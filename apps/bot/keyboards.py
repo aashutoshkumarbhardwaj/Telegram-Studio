@@ -2,6 +2,7 @@
 Telegram Inline Keyboard Definitions for Heyaaashu Studio Bot.
 """
 
+from typing import List
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from packages.post_schema import ContentType
 
@@ -56,22 +57,44 @@ def get_research_category_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for selecting research topics."""
     keyboard = [
         [
-            InlineKeyboardButton(text="🚨 AI News", callback_data="res:ai_news"),
-            InlineKeyboardButton(text="💼 Jobs & Hiring", callback_data="res:job"),
+            InlineKeyboardButton(text="🚨 AI News", callback_data="res_cat:ai_news"),
+            InlineKeyboardButton(text="💼 Jobs & Hiring", callback_data="res_cat:job"),
         ],
         [
-            InlineKeyboardButton(text="🎓 Internships", callback_data="res:internship"),
-            InlineKeyboardButton(text="🏆 Hackathons", callback_data="res:hackathon"),
+            InlineKeyboardButton(text="🎓 Internships", callback_data="res_cat:internship"),
+            InlineKeyboardButton(text="🏆 Hackathons", callback_data="res_cat:hackathon"),
         ],
         [
-            InlineKeyboardButton(text="🛠 AI Tools", callback_data="res:ai_tool"),
-            InlineKeyboardButton(text="🐙 GitHub Trending", callback_data="res:github"),
+            InlineKeyboardButton(text="🛠 AI Tools", callback_data="res_cat:ai_tool"),
+            InlineKeyboardButton(text="🧠 Career Insights", callback_data="res_cat:career"),
         ],
         [
-            InlineKeyboardButton(text="🧠 Career Insights", callback_data="res:career"),
+            InlineKeyboardButton(text="📚 Resources", callback_data="res_cat:resource"),
             InlineKeyboardButton(text="❌ Cancel", callback_data="action:cancel_creation"),
         ],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_research_candidates_keyboard(candidates: list, cat_key: str) -> InlineKeyboardMarkup:
+    """Keyboard listing top verified research candidates."""
+    keyboard = []
+    
+    number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+    for i, cand in enumerate(candidates):
+        num = number_emojis[i] if i < len(number_emojis) else f"{i+1}."
+        short_title = cand.title if len(cand.title) <= 28 else cand.title[:25] + "..."
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{num} {short_title}",
+                callback_data=f"res_pick:{cand.id}",
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton(text="🔄 Refresh Sources", callback_data=f"res_cat:{cat_key}"),
+        InlineKeyboardButton(text="❌ Cancel", callback_data="action:cancel_creation"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
