@@ -1,21 +1,40 @@
 """
 Heyaaashu Studio Backend API Server.
-Provides canonical PostSchema validation, draft management, formatting, preview, and publishing endpoints.
-Built on aiohttp.web with authentication middleware, origin restriction, and zero external dependencies.
+Provides canonical PostSchema validation, draft management, formatting, preview, publishing,
+and Telegram Webhook routing for free cloud deployments (Render).
+Built on aiohttp.web with authentication, CORS restriction, and zero external web framework overhead.
 """
 
+import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from aiohttp import web
 from pydantic import ValidationError
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import Update
+
+from apps.bot.handlers.daily import router as daily_router
+from apps.bot.handlers.new_post import router as new_post_router
+from apps.bot.handlers.preview_actions import router as preview_actions_router
+from apps.bot.handlers.research import router as research_router
+from apps.bot.handlers.start import router as start_router
 
 from packages.formatter import format_post_text, generate_telegram_payload, validate_telegram_constraints
 from packages.post_schema import PostSchema
 from packages.shared.config import (
     ALLOWED_ORIGINS,
     BOT_TOKEN,
+    DATABASE_PATH,
+    DATABASE_URL,
+    PUBLIC_APP_URL,
     STUDIO_AUTH_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET,
     get_target_channel_id,
 )
 from packages.shared.db import StudioDatabase
@@ -38,7 +57,7 @@ def _get_cors_headers(request: Optional[web.Request] = None) -> dict:
     return {
         "Access-Control-Allow-Origin": allowed_origin,
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Studio-Auth, Accept",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Studio-Auth, X-Telegram-Bot-Api-Secret-Token, Accept",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
@@ -66,12 +85,16 @@ def verify_request_auth(request: web.Request) -> bool:
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler) -> web.Response:
-    """Enforces authentication across all protected studio API endpoints."""
+    """Enforces authentication across protected studio API endpoints while keeping webhooks & health public."""
     if request.method == "OPTIONS":
         return await handler(request)
 
-    # Public unauthenticated endpoints
-    if request.path in ["/api/health", "/api/auth/login"]:
+    # Public unauthenticated endpoints (Health, Telegram Webhook, Login)
+    if request.path in ["/api/health", "/api/auth/login", "/api/telegram/webhook"]:
+        return await handler(request)
+
+    # Static assets and SPA routes are public
+    if not request.path.startswith("/api/"):
         return await handler(request)
 
     # Verify studio authentication token
@@ -90,10 +113,13 @@ async def handle_options(request: web.Request) -> web.Response:
 
 
 async def health_check(request: web.Request) -> web.Response:
-    """GET /api/health — Health check endpoint for Docker & reverse proxy."""
+    """GET /api/health — Health check endpoint for Render & Docker."""
+    db: StudioDatabase = request.app.get("db")
     return web.json_response({
         "status": "healthy",
         "service": "heyaaashu-studio-api",
+        "database": "postgresql" if getattr(db, "is_postgres", False) else "sqlite",
+        "webhook_enabled": bool(request.app.get("bot")),
         "version": "1.0.0",
     }, headers=_get_cors_headers(request))
 
@@ -114,6 +140,77 @@ async def login_endpoint(request: web.Request) -> web.Response:
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=400, headers=cors)
 
+
+# ─── TELEGRAM WEBHOOK HANDLERS ──────────────────────────────────────────────────
+
+async def telegram_webhook_endpoint(request: web.Request) -> web.Response:
+    """POST /api/telegram/webhook — Routes incoming Telegram updates into aiogram dispatcher."""
+    cors = _get_cors_headers(request)
+
+    # 1. Verify Webhook Secret Token if configured
+    if TELEGRAM_WEBHOOK_SECRET:
+        secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if secret_header != TELEGRAM_WEBHOOK_SECRET:
+            logger.warning("Rejected Telegram webhook request: secret token mismatch.")
+            return web.json_response({"error": "Forbidden: Invalid secret token"}, status=403, headers=cors)
+
+    bot: Optional[Bot] = request.app.get("bot")
+    dp: Optional[Dispatcher] = request.app.get("dp")
+
+    if not bot or not dp:
+        logger.error("Telegram bot or dispatcher not initialized on API server.")
+        return web.json_response({"error": "Bot service unavailable"}, status=503, headers=cors)
+
+    try:
+        data = await request.json()
+        update = Update.model_validate(data, context={"bot": bot})
+        await dp.feed_update(bot=bot, update=update)
+        return web.json_response({"ok": True}, headers=cors)
+    except Exception as e:
+        logger.error(f"Error processing Telegram webhook update: {e}", exc_info=True)
+        return web.json_response({"ok": False, "error": str(e)}, status=500, headers=cors)
+
+
+async def set_telegram_webhook_endpoint(request: web.Request) -> web.Response:
+    """POST /api/telegram/set-webhook — Configures the Telegram webhook URL."""
+    cors = _get_cors_headers(request)
+    bot: Optional[Bot] = request.app.get("bot")
+
+    if not bot:
+        return web.json_response({"success": False, "error": "Bot token not configured"}, status=400, headers=cors)
+
+    try:
+        body = await request.json() if request.can_read_body else {}
+    except Exception:
+        body = {}
+
+    webhook_url = body.get("webhook_url") or (f"{PUBLIC_APP_URL}/api/telegram/webhook" if PUBLIC_APP_URL else None)
+
+    if not webhook_url:
+        return web.json_response({
+            "success": False,
+            "error": "Missing webhook_url parameter and PUBLIC_APP_URL environment variable is not set."
+        }, status=400, headers=cors)
+
+    try:
+        await bot.set_webhook(
+            url=webhook_url,
+            secret_token=TELEGRAM_WEBHOOK_SECRET or None,
+            drop_pending_updates=True,
+        )
+        info = await bot.get_webhook_info()
+        logger.info(f"Telegram webhook configured to: {info.url}")
+        return web.json_response({
+            "success": True,
+            "webhook_url": info.url,
+            "pending_update_count": info.pending_update_count,
+        }, headers=cors)
+    except Exception as e:
+        logger.error(f"Failed to set Telegram webhook: {e}", exc_info=True)
+        return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
+
+
+# ─── DRAFT & PUBLISH ENDPOINTS ──────────────────────────────────────────────────
 
 async def get_drafts(request: web.Request) -> web.Response:
     """GET /api/drafts — Lists all stored drafts."""
@@ -141,8 +238,11 @@ async def get_draft_by_id(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": "Draft not found"}, status=404, headers=cors)
 
     with db.get_connection() as conn:
-        row = conn.cursor().execute("SELECT status, post_id, created_at FROM posts WHERE post_id = ?", (draft_id,)).fetchone()
-        status = row["status"] if row else "draft"
+        cursor = conn.cursor()
+        query = "SELECT status, post_id, created_at FROM posts WHERE post_id = " + ("%s" if db.is_postgres else "?")
+        cursor.execute(query, (draft_id,))
+        row = cursor.fetchone()
+        status = dict(row)["status"] if row else "draft"
 
     return web.json_response({
         "success": True,
@@ -206,8 +306,11 @@ async def delete_draft(request: web.Request) -> web.Response:
     cors = _get_cors_headers(request)
     draft_id = int(request.match_info["id"])
     with db.get_connection() as conn:
-        conn.cursor().execute("DELETE FROM posts WHERE post_id = ?", (draft_id,))
-        conn.commit()
+        cursor = conn.cursor()
+        query = "DELETE FROM posts WHERE post_id = " + ("%s" if db.is_postgres else "?")
+        cursor.execute(query, (draft_id,))
+        if not db.is_postgres:
+            conn.commit()
     return web.json_response({"success": True, "deleted_id": draft_id}, headers=cors)
 
 
@@ -274,14 +377,75 @@ async def publish_post_endpoint(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
 
 
-def create_app(db: Optional[StudioDatabase] = None) -> web.Application:
-    """Creates the aiohttp web application with authentication and CORS."""
-    app = web.Application(middlewares=[auth_middleware])
-    app["db"] = db or StudioDatabase()
+# ─── SPA STATIC ASSETS FALLBACK ─────────────────────────────────────────────────
 
+async def serve_spa_index(request: web.Request) -> web.Response:
+    """Serves index.html for root and SPA client routes in single-container mode."""
+    possible_paths = [
+        Path(__file__).resolve().parent.parent / "message-builder" / "dist" / "index.html",
+        Path("/app/apps/message-builder/dist/index.html"),
+        Path("/app/dist/index.html"),
+        Path("apps/message-builder/dist/index.html"),
+    ]
+    for p in possible_paths:
+        if p.exists():
+            return web.FileResponse(p)
+    return web.json_response({"status": "healthy", "message": "Heyaaashu Studio API is running"}, headers=_get_cors_headers(request))
+
+
+def create_app(
+    db: Optional[StudioDatabase] = None,
+    bot: Optional[Bot] = None,
+    dp: Optional[Dispatcher] = None,
+) -> web.Application:
+    """Creates the aiohttp web application with webhook routing and SPA serving."""
+    app = web.Application(middlewares=[auth_middleware])
+    database = db or StudioDatabase()
+    app["db"] = database
+
+    # Set up Telegram Bot
+    if bot:
+        app["bot"] = bot
+    elif BOT_TOKEN and BOT_TOKEN != "YOUR_TELEGRAM_BOT_TOKEN":
+        try:
+            app["bot"] = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        except Exception as e:
+            logger.warning(f"Could not initialize Telegram Bot: {e}")
+
+    # Set up Telegram Dispatcher
+    if dp:
+        app["dp"] = dp
+    elif app.get("bot"):
+        try:
+            dispatcher = Dispatcher()
+            dispatcher.workflow_data.update(db=database)
+            for r in [start_router, daily_router, new_post_router, preview_actions_router, research_router]:
+                if r.parent_router is not None:
+                    r._parent_router = None
+                dispatcher.include_router(r)
+            app["dp"] = dispatcher
+        except Exception as e:
+            logger.warning(f"Could not initialize Telegram Dispatcher: {e}")
+
+    if app.get("bot"):
+        async def on_cleanup(app):
+            bot_inst = app.get("bot")
+            if bot_inst and hasattr(bot_inst, "session") and hasattr(bot_inst.session, "close"):
+                try:
+                    res = bot_inst.session.close()
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+
+        app.on_cleanup.append(on_cleanup)
+
+    # API routes
     app.router.add_options("/{tail:.*}", handle_options)
     app.router.add_get("/api/health", health_check)
     app.router.add_post("/api/auth/login", login_endpoint)
+    app.router.add_post("/api/telegram/webhook", telegram_webhook_endpoint)
+    app.router.add_post("/api/telegram/set-webhook", set_telegram_webhook_endpoint)
     app.router.add_get("/api/drafts", get_drafts)
     app.router.add_get("/api/drafts/{id}", get_draft_by_id)
     app.router.add_post("/api/drafts", create_draft)
@@ -290,10 +454,22 @@ def create_app(db: Optional[StudioDatabase] = None) -> web.Application:
     app.router.add_post("/api/preview", generate_preview)
     app.router.add_post("/api/publish", publish_post_endpoint)
 
+    # Static assets routes if compiled dist exists
+    dist_dir = Path(__file__).resolve().parent.parent / "message-builder" / "dist"
+    if not dist_dir.exists():
+        dist_dir = Path("/app/apps/message-builder/dist")
+
+    if dist_dir.exists():
+        assets_dir = dist_dir / "assets"
+        if assets_dir.exists():
+            app.router.add_static("/assets", path=str(assets_dir))
+        app.router.add_get("/{tail:(?!api).*}", serve_spa_index)
+
     return app
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    port = int(os.getenv("PORT", 8000))
     app = create_app()
-    web.run_app(app, host=None, port=8000)
+    web.run_app(app, host=None, port=port)

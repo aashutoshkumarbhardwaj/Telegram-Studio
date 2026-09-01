@@ -27,10 +27,16 @@ ADMIN_CHAT_ID: int = int(os.getenv("ADMIN_CHAT_ID") or "8982444793")
 TARGET_CHANNEL_ID: str = os.getenv("TARGET_CHANNEL_ID") or "-1003756584531"
 
 # --- Database ---
+DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
 DATABASE_PATH: str = os.getenv(
     "DATABASE_PATH",
     str(ROOT_DIR / "apps" / "telegram-publisher" / "posting_bot.db"),
 )
+
+# --- Webhook & Cloud Deployment ---
+TELEGRAM_WEBHOOK_SECRET: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", os.getenv("RENDER_EXTERNAL_URL", "")).strip().rstrip("/")
+
 
 # --- LLM & AI ---
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai").strip().lower()
