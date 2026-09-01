@@ -16,6 +16,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+from apps.bot.handlers.daily import router as daily_router
 from apps.bot.handlers.new_post import router as new_post_router
 from apps.bot.handlers.preview_actions import router as preview_actions_router
 from apps.bot.handlers.research import router as research_router
@@ -52,11 +53,12 @@ async def start_bot():
 
     # Register routers
     dp.include_router(start_router)
+    dp.include_router(daily_router)
     dp.include_router(new_post_router)
     dp.include_router(preview_actions_router)
     dp.include_router(research_router)
 
-    logger.info("Registered routers: start, new_post, preview_actions, research.")
+    logger.info("Registered routers: start, daily, new_post, preview_actions, research.")
 
     try:
         # Drop pending updates so old messages don't spam

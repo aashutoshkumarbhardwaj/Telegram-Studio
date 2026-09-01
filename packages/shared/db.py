@@ -1,8 +1,9 @@
 """
 Unified Database Layer for Heyaaashu Studio.
-Manages drafts, channels, published posts, reaction counters, and research candidate cache.
+Manages drafts, channels, published posts, reaction counters, research cache, and surfaced stories.
 """
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime
@@ -72,10 +73,11 @@ class StudioDatabase:
                     reactions_json TEXT,
                     source_json TEXT,
                     parse_mode TEXT DEFAULT 'HTML',
-                    status TEXT DEFAULT 'draft', -- 'draft', 'approved', 'posted', 'failed', 'cancelled'
+                    status TEXT DEFAULT 'draft', -- 'candidate', 'draft', 'approved', 'posted', 'rejected', 'cancelled'
                     raw_schema_json TEXT,
                     scheduled_at TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    published_at TIMESTAMP
                 )
             """)
             
@@ -118,6 +120,17 @@ class StudioDatabase:
                 )
             """)
 
+            # Surfaced Stories table for Daily duplicate protection across runs
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS surfaced_stories (
+                    url_hash TEXT PRIMARY KEY,
+                    url TEXT,
+                    title TEXT,
+                    category TEXT,
+                    surfaced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Dynamic migrations to support existing PostingPost databases
             migrations = [
                 ("title", "TEXT"),
@@ -128,6 +141,7 @@ class StudioDatabase:
                 ("parse_mode", "TEXT DEFAULT 'HTML'"),
                 ("raw_schema_json", "TEXT"),
                 ("status", "TEXT DEFAULT 'draft'"),
+                ("published_at", "TIMESTAMP"),
             ]
             for col_name, col_type in migrations:
                 try:
@@ -137,7 +151,7 @@ class StudioDatabase:
 
             conn.commit()
 
-    def save_draft(self, user_id: int, post: PostSchema, channel_id: Optional[int] = None) -> int:
+    def save_draft(self, user_id: int, post: PostSchema, channel_id: Optional[int] = None, status: str = "draft") -> int:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             schema_json = post.model_dump_json()
@@ -147,8 +161,8 @@ class StudioDatabase:
 
             cursor.execute("""
                 INSERT INTO posts (user_id, channel_id, content_type, title, text, media_json, buttons_json, source_json, parse_mode, status, raw_schema_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)
-            """, (user_id, channel_id, post.content_type.value, post.title, post.body, media_json, buttons_json, source_json, post.parse_mode.value, schema_json))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, channel_id, post.content_type.value, post.title, post.body, media_json, buttons_json, source_json, post.parse_mode.value, status, schema_json))
             conn.commit()
             return cursor.lastrowid
 
@@ -186,7 +200,11 @@ class StudioDatabase:
     def mark_post_published(self, post_id: int, channel_id: int, message_id: int):
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("UPDATE posts SET status = 'posted', channel_id = ? WHERE post_id = ?", (channel_id, post_id))
+            cursor.execute("""
+                UPDATE posts 
+                SET status = 'posted', channel_id = ?, published_at = CURRENT_TIMESTAMP 
+                WHERE post_id = ?
+            """, (channel_id, post_id))
             cursor.execute("INSERT OR REPLACE INTO sent_posts (channel_id, message_id, post_id) VALUES (?, ?, ?)", (channel_id, message_id, post_id))
             conn.commit()
 
@@ -251,3 +269,30 @@ class StudioDatabase:
             cursor.execute("SELECT * FROM research_cache WHERE candidate_id = ?", (candidate_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    # ─── SURFACED STORIES TRACKING ───────────────────────────────────────────────
+
+    def is_url_surfaced(self, url: str) -> bool:
+        """Checks if a URL has already been surfaced in previous daily runs."""
+        url_hash = hashlib.md5(url.strip().lower().encode("utf-8")).hexdigest()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM surfaced_stories WHERE url_hash = ?", (url_hash,))
+            return cursor.fetchone() is not None
+
+    def mark_stories_surfaced(self, candidates: list):
+        """Records surfaced candidate URLs to prevent consecutive duplicate recommendations."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for c in candidates:
+                url = getattr(c, "source_url", "")
+                if not url:
+                    continue
+                url_hash = hashlib.md5(url.strip().lower().encode("utf-8")).hexdigest()
+                category = getattr(c, "category", "")
+                cat_val = category.value if hasattr(category, "value") else str(category)
+                cursor.execute("""
+                    INSERT OR REPLACE INTO surfaced_stories (url_hash, url, title, category, surfaced_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (url_hash, url, getattr(c, "title", ""), cat_val))
+            conn.commit()

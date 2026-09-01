@@ -2,7 +2,7 @@
 Telegram Inline Keyboard Definitions for Heyaaashu Studio Bot.
 """
 
-from typing import List
+from typing import List, Optional
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from packages.post_schema import ContentType
 
@@ -98,16 +98,59 @@ def get_research_candidates_keyboard(candidates: list, cat_key: str) -> InlineKe
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+def get_daily_brief_keyboard(
+    candidates_page: list,
+    page: int = 1,
+    total_pages: int = 1,
+) -> InlineKeyboardMarkup:
+    """Compact keyboard for the Daily Content Brief with pagination and Draft Top 5."""
+    keyboard = []
+
+    # Row of numbered quick-draft buttons (e.g. [1️⃣] [2️⃣] [3️⃣] [4️⃣] [5️⃣])
+    num_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"]
+    quick_draft_row = []
+    for i, cand in enumerate(candidates_page):
+        emoji = num_emojis[i] if i < len(num_emojis) else f"[{i+1}]"
+        quick_draft_row.append(
+            InlineKeyboardButton(text=emoji, callback_data=f"daily_pick:{cand.id}")
+        )
+    if quick_draft_row:
+        keyboard.append(quick_draft_row)
+
+    # Action row: Draft Top 5
+    keyboard.append([
+        InlineKeyboardButton(text="✍️ Draft Top 5 Posts", callback_data="daily_draft_top5")
+    ])
+
+    # Pagination row
+    if total_pages > 1:
+        prev_page = page - 1 if page > 1 else total_pages
+        next_page = page + 1 if page < total_pages else 1
+        keyboard.append([
+            InlineKeyboardButton(text="◀️ Prev", callback_data=f"daily_page:{prev_page}"),
+            InlineKeyboardButton(text=f"Page {page}/{total_pages}", callback_data="noop"),
+            InlineKeyboardButton(text="Next ▶️", callback_data=f"daily_page:{next_page}"),
+        ])
+
+    # Utility row
+    keyboard.append([
+        InlineKeyboardButton(text="🔄 Refresh Brief", callback_data="daily_refresh"),
+        InlineKeyboardButton(text="❌ Close", callback_data="action:cancel_creation"),
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Main start menu keyboard."""
     keyboard = [
         [
+            InlineKeyboardButton(text="☀️ Daily Brief (/daily)", callback_data="cmd:daily"),
             InlineKeyboardButton(text="✍️ New Post (/new)", callback_data="cmd:new"),
-            InlineKeyboardButton(text="🔍 Research (/research)", callback_data="cmd:research"),
         ],
         [
-            InlineKeyboardButton(text="📁 Drafts", callback_data="cmd:drafts"),
-            InlineKeyboardButton(text="📢 Channels", callback_data="cmd:channels"),
+            InlineKeyboardButton(text="🔍 Research (/research)", callback_data="cmd:research"),
+            InlineKeyboardButton(text="📢 Channels (/channels)", callback_data="cmd:channels"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
