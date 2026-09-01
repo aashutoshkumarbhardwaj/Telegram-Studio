@@ -98,6 +98,24 @@ class StudioDatabase:
                     PRIMARY KEY (post_id, user_id)
                 )
             """)
+
+            # Dynamic migrations to support existing PostingPost databases
+            migrations = [
+                ("title", "TEXT"),
+                ("media_json", "TEXT"),
+                ("buttons_json", "TEXT"),
+                ("reactions_json", "TEXT"),
+                ("source_json", "TEXT"),
+                ("parse_mode", "TEXT DEFAULT 'HTML'"),
+                ("raw_schema_json", "TEXT"),
+                ("status", "TEXT DEFAULT 'draft'"),
+            ]
+            for col_name, col_type in migrations:
+                try:
+                    cursor.execute(f"ALTER TABLE posts ADD COLUMN {col_name} {col_type}")
+                except sqlite3.OperationalError:
+                    pass
+
             conn.commit()
 
     def save_draft(self, user_id: int, post: PostSchema, channel_id: Optional[int] = None) -> int:
