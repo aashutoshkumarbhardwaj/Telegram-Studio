@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here.
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Light Mode (Strict Native Telegram Day) */
+    --background: 0 0% 100%;
+    /* #ffffff */
+    --foreground: 0 0% 0%;
+
+    --card: 0 0% 100%;
+    /* #ffffff */
+    --card-foreground: 0 0% 0%;
+
+    --popover: 0 0% 100%;
+    /* #ffffff */
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 210 82% 56%;
+    /* #3390ec */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 96%;
+    /* #f0f2f5 */
+    --secondary-foreground: 0 0% 0%;
+
+    --muted: 210 20% 96%;
+    /* #f0f2f5 */
+    --muted-foreground: 220 8% 46%;
+    /* #707579 */
+
+    --accent: 210 20% 96%;
+    /* #f0f2f5 */
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 13% 91%;
+    /* #e4e4e5 */
+    --input: 220 13% 91%;
+    --ring: 210 82% 56%;
+
+    --radius: 0.5rem;
+
+    /* Telegram Specifics - Light Mode */
+    --telegram-blue: 210 82% 56%;
+    /* #3390ec */
+    --telegram-bg: 206 28% 87%;
+    /* #dbeafe - Classic Light Blue-ish Chat BG */
+    --telegram-sent: 87 58% 93%;
+    /* #effdde */
+    --telegram-received: 0 0% 100%;
+    /* #ffffff */
+    --telegram-text: 0 0% 0%;
+    --telegram-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+    --telegram-button: 210 82% 56%;
+    --telegram-button-text: 0 0% 100%;
+    --telegram-header: 0 0% 100%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 0%;
+    --sidebar-primary: 210 82% 56%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 20% 96%;
+    --sidebar-accent-foreground: 210 82% 56%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 210 82% 56%;
+  }
+
+  .dark {
+    /* Dark Mode (Strict Native Telegram Night) */
+    --background: 210 30% 13%;
+    /* #17212b */
+    --foreground: 0 0% 100%;
+
+    --card: 210 30% 13%;
+    /* #17212b */
+    --card-foreground: 0 0% 100%;
+
+    --popover: 210 30% 13%;
+    /* #17212b */
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 210 82% 56%;
+    /* #3390ec */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 211 36% 15%;
+    /* #182533 */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 211 36% 15%;
+    /* #182533 */
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 211 36% 15%;
+    /* #182533 */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 28% 10%;
+    /* Slightly darker than bg */
+    --input: 211 36% 15%;
+    --ring: 210 82% 56%;
+
+    /* Telegram Specifics - Dark Mode */
+    --telegram-blue: 210 82% 56%;
+    /* #3390ec */
+    --telegram-bg: 215 40% 9%;
+    /* #0e1621 */
+    --telegram-sent: 210 47% 32%;
+    /* #2b5278 */
+    --telegram-received: 211 36% 15%;
+    /* #182533 */
+    --telegram-text: 0 0% 100%;
+    --telegram-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --telegram-button: 210 82% 56%;
+    --telegram-button-text: 0 0% 100%;
+    --telegram-header: 210 30% 13%;
+    /* #17212b */
+
+    --sidebar-background: 210 30% 13%;
+    /* #17212b */
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 210 82% 56%;
+    /* #3390ec */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 211 36% 15%;
+    /* #182533 */
+    --sidebar-accent-foreground: 210 82% 56%;
+    --sidebar-border: 215 40% 9%;
+    /* #0e1621 */
+    --sidebar-ring: 210 82% 56%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply text-foreground bg-background;
+  }
+
+  /* Strong, accessible focus styles that work on dark surfaces */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, hsl(var(--ring)) 25%, transparent);
+  }
+
+  /* Ensure focus rings show on key interactive elements even if they use custom styles */
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible,
+  a:focus-visible,
+  [data-focus-visible-added]:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px color-mix(in srgb, hsl(var(--ring)) 25%, transparent);
+    border-color: hsl(var(--ring));
+  }
+}

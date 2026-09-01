@@ -1,0 +1,72 @@
+name: Deploy Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      VITE_ERROR_REPORTING_URL: ${{ secrets.VITE_ERROR_REPORTING_URL }}
+      # Note: API key removed - error reporting endpoint should be public or use server-side proxy
+      VITE_APP_VERSION: ${{ github.sha }}
+      VITE_COMMIT_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `build:prod` runs verify-env with --check-env, which hard-fails when
+      # VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY are unset. Those
+      # secrets have never been configured on this repository, so every Pages
+      # deploy since 2026-06-10 failed and the published demo stayed frozen on
+      # the May build. The demo does not need a backend: the Supabase client
+      # falls back to safe local defaults and the affected features degrade.
+      # Plain `build` is used here on purpose — keep `build:prod --check-env`
+      # for real production deploys, where the secrets do exist.
+      - name: Build (GitHub Pages base)
+        run: npm run build -- --base=/telegram-ui-builder/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+        # Pages is enabled at the repo level (build_type=workflow) so the
+        # action just reads the config. `enablement: true` requires pages:admin
+        # which the default GITHUB_TOKEN does not have.
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

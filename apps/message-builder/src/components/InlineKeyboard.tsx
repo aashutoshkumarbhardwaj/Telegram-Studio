@@ -1,0 +1,525 @@
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  DndContext,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  closestCenter,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { X, Settings } from "lucide-react";
+import type { KeyboardRow, KeyboardButton, Screen } from "@/types/telegram";
+import ButtonEditDialog from "./ButtonEditDialog";
+import clsx from "clsx";
+import { CALLBACK_DATA_MAX_BYTES, MAX_BUTTONS_PER_ROW, MAX_KEYBOARD_ROWS, getByteLength, getKeyboardValidationErrors } from "@/lib/validation";
+import { toast } from "sonner";
+
+interface InlineKeyboardProps {
+  keyboard: KeyboardRow[];
+  onButtonTextChange?: (rowId: string, buttonId: string, newText: string) => void;
+  onButtonUpdate?: (rowId: string, buttonId: string, button: KeyboardButton) => void;
+  onDeleteButton?: (rowId: string, buttonId: string) => void;
+  onButtonClick?: (button: KeyboardButton) => void;
+  isPreviewMode?: boolean;
+  readOnly?: boolean;
+  screens?: Screen[];
+  onReorder?: (rows: KeyboardRow[]) => void;
+}
+
+const InlineKeyboard = React.memo(({
+  keyboard,
+  onButtonTextChange,
+  onButtonUpdate,
+  onDeleteButton,
+  onButtonClick,
+  isPreviewMode = false,
+  readOnly = false,
+  screens = [],
+  onReorder,
+}: InlineKeyboardProps) => {
+  const [editingButton, setEditingButton] = useState<string | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedButton, setSelectedButton] = useState<{ row: KeyboardRow; button: KeyboardButton } | null>(null);
+  const overflowWarning = React.useRef({ rows: false, buttons: false });
+  const truncationWarningRef = React.useRef(new Set<string>());
+
+  const focusButton = (rowId: string, buttonId: string) => {
+    requestAnimationFrame(() => {
+      document.getElementById(`kbd-${rowId}-${buttonId}`)?.focus();
+    });
+  };
+
+  const displayRows = useMemo(() => {
+    const cappedRows = keyboard.slice(0, MAX_KEYBOARD_ROWS);
+    return cappedRows.map((row) => {
+      if (row.buttons.length <= MAX_BUTTONS_PER_ROW) return row;
+      return { ...row, buttons: row.buttons.slice(0, MAX_BUTTONS_PER_ROW) };
+    });
+  }, [keyboard]);
+
+  const getNextFocusAfterDelete = (rowId: string, buttonId: string) => {
+    const rowIndex = displayRows.findIndex((r) => r.id === rowId);
+    const row = displayRows[rowIndex];
+    if (!row) return null;
+    const idx = row.buttons.findIndex((b) => b.id === buttonId);
+    const next = row.buttons[idx + 1];
+    if (next) return { rowId, buttonId: next.id };
+    const prev = row.buttons[idx - 1];
+    if (prev) return { rowId, buttonId: prev.id };
+    const nextRow = displayRows[rowIndex + 1];
+    if (nextRow?.buttons[0]) return { rowId: nextRow.id, buttonId: nextRow.buttons[0].id };
+    const prevRow = displayRows[rowIndex - 1];
+    if (prevRow?.buttons.length) {
+      const last = prevRow.buttons[prevRow.buttons.length - 1];
+      return { rowId: prevRow.id, buttonId: last.id };
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    if (!selectedButton) return;
+    const latestRow = keyboard.find((row) => row.id === selectedButton.row.id);
+    const latestButton = latestRow?.buttons.find((btn) => btn.id === selectedButton.button.id);
+
+    if (!latestRow || !latestButton) {
+      setSelectedButton(null);
+      setEditDialogOpen(false);
+      return;
+    }
+
+    if (latestRow !== selectedButton.row || latestButton !== selectedButton.button) {
+      setSelectedButton({ row: latestRow, button: latestButton });
+    }
+  }, [keyboard, selectedButton]);
+
+  const validationErrors = useMemo(() => {
+    if (readOnly) return [];
+    return getKeyboardValidationErrors(keyboard);
+  }, [keyboard, readOnly]);
+
+  const rowOverflow = keyboard.length > MAX_KEYBOARD_ROWS;
+  const buttonOverflow = keyboard.some((row) => row.buttons.length > MAX_BUTTONS_PER_ROW);
+  const overflowMessages = useMemo(() => {
+    if (readOnly) return [];
+    const messages: string[] = [];
+    if (rowOverflow) {
+      messages.push(`已超过 Telegram 限制：最多 ${MAX_KEYBOARD_ROWS} 行按钮，超出部分将被隐藏。`);
+    }
+    if (buttonOverflow) {
+      messages.push(`已超过 Telegram 限制：每行最多 ${MAX_BUTTONS_PER_ROW} 个按钮，超出部分将被隐藏。`);
+    }
+    return messages;
+  }, [rowOverflow, buttonOverflow, readOnly]);
+
+  useEffect(() => {
+    if (readOnly) return;
+    if (rowOverflow && !overflowWarning.current.rows) {
+      toast.warning(`已超过 Telegram 限制：最多 ${MAX_KEYBOARD_ROWS} 行按钮，超出部分将被隐藏。`);
+      overflowWarning.current.rows = true;
+    }
+    if (!rowOverflow) {
+      overflowWarning.current.rows = false;
+    }
+    if (buttonOverflow && !overflowWarning.current.buttons) {
+      toast.warning(`已超过 Telegram 限制：每行最多 ${MAX_BUTTONS_PER_ROW} 个按钮，超出部分将被隐藏。`);
+      overflowWarning.current.buttons = true;
+    }
+    if (!buttonOverflow) {
+      overflowWarning.current.buttons = false;
+    }
+  }, [rowOverflow, buttonOverflow, readOnly]);
+
+  const handleTextEditClick = (buttonId: string) => {
+    setEditingButton(buttonId);
+  };
+
+  const handleTextChange = (rowId: string, buttonId: string, newText: string) => {
+    // Limit text length to prevent overflow
+    const truncatedText = newText.slice(0, 30);
+    if (!readOnly) {
+      const key = `${rowId}:${buttonId}`;
+      if (truncatedText.length < newText.length) {
+        if (!truncationWarningRef.current.has(key)) {
+          toast.warning("按钮文字已截断至 30 字符，以符合 Telegram 限制");
+          truncationWarningRef.current.add(key);
+        }
+      } else {
+        truncationWarningRef.current.delete(key);
+      }
+    }
+    if (!onButtonTextChange) return;
+    onButtonTextChange(rowId, buttonId, truncatedText);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  };
+
+  const handleEditClick = (row: KeyboardRow, button: KeyboardButton, trigger?: HTMLButtonElement | null) => {
+    if (trigger) {
+      lastDialogTrigger.current = trigger;
+    }
+    setSelectedButton({ row, button });
+    setEditDialogOpen(true);
+  };
+
+  const handleSaveButton = (updatedButton: KeyboardButton) => {
+    if (selectedButton && onButtonUpdate) {
+      onButtonUpdate(selectedButton.row.id, selectedButton.button.id, updatedButton);
+    }
+  };
+
+  const handleDialogOpenChange = (open: boolean) => {
+    setEditDialogOpen(open);
+    if (!open) {
+      setSelectedButton(null);
+      // Restore focus to the last trigger for accessibility
+      if (lastDialogTrigger?.current) {
+        lastDialogTrigger.current.focus();
+      }
+    }
+  };
+
+  const lastDialogTrigger = React.useRef<HTMLButtonElement | null>(null);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || !onReorder) return;
+    const [activeType, activeId] = String(active.id).split(":");
+    const [overType, overId] = String(over.id).split(":");
+
+    // Row reorder
+    if (activeType === "row" && overType === "row" && activeId !== overId) {
+      const rowOrder = keyboard.map((r) => r.id);
+      const oldIndex = rowOrder.indexOf(activeId);
+      const newIndex = rowOrder.indexOf(overId);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const newRows = arrayMove(keyboard, oldIndex, newIndex);
+      onReorder(newRows);
+      return;
+    }
+
+    // Button reorder within a row
+    if (activeType === "btn" && overType === "btn") {
+      const [activeRowId, activeBtnId] = activeId.split("_");
+      const [overRowId, overBtnId] = overId.split("_");
+      if (activeRowId !== overRowId) return; // cross-row reorder skip for now
+      const targetRow = keyboard.find((r) => r.id === activeRowId);
+      if (!targetRow) return;
+      const order = targetRow.buttons.map((b) => b.id);
+      const oldIndex = order.indexOf(activeBtnId);
+      const newIndex = order.indexOf(overBtnId);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const newButtons = arrayMove(targetRow.buttons, oldIndex, newIndex);
+      const newRows = keyboard.map((row) =>
+        row.id === activeRowId ? { ...row, buttons: newButtons } : row
+      );
+      onReorder(newRows);
+    }
+  };
+
+  const SortableRow = ({ row }: { row: KeyboardRow }) => {
+    const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+      id: `row:${row.id}`,
+    });
+    const rowHasTooManyButtons = (keyboard.find((item) => item.id === row.id)?.buttons.length ?? 0) > MAX_BUTTONS_PER_ROW;
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+    };
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        className={clsx(
+          "flex flex-col gap-2",
+          !readOnly && rowHasTooManyButtons && "ring-1 ring-destructive/50 rounded-md"
+        )}
+      >
+        <SortableContext items={row.buttons.map((b) => `btn:${row.id}_${b.id}`)} strategy={horizontalListSortingStrategy}>
+          <div className="flex gap-[2px]" role="list">
+            {row.buttons.map((button, index) => (
+              <SortableButton key={button.id} row={row} button={button} index={index} />
+            ))}
+          </div>
+        </SortableContext>
+        {!readOnly && rowHasTooManyButtons && (
+          <div
+            className="text-[11px] text-destructive px-1 pb-1"
+            role="status"
+            aria-live="polite"
+          >
+            每行最多 {MAX_BUTTONS_PER_ROW} 个按钮
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const SortableButton = ({ row, button, index }: { row: KeyboardRow; button: KeyboardButton; index: number }) => {
+    const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+      id: `btn:${row.id}_${button.id}`,
+    });
+    const callbackTooLong = !readOnly && !isPreviewMode && !!button.callback_data && getByteLength(button.callback_data) > CALLBACK_DATA_MAX_BYTES;
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+    };
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className="relative flex-1 group hover:z-50"
+        onClick={() => {
+          if (isPreviewMode && onButtonClick) {
+            onButtonClick(button);
+          } else if (!readOnly && !isPreviewMode) {
+            handleTextEditClick(button.id);
+          }
+        }}
+        onDoubleClick={() => {
+          if (!readOnly && !isPreviewMode) {
+            handleTextEditClick(button.id);
+          }
+        }}
+      >
+        <button
+          {...attributes}
+          {...listeners}
+          onKeyDown={(e) => {
+            if (editingButton) return; // let input handle
+            const currentRowIndex = displayRows.findIndex((r) => r.id === row.id);
+            const currentBtnIndex = row.buttons.findIndex((b) => b.id === button.id);
+            if (e.key === 'Tab') {
+              const isShift = e.shiftKey;
+              if (isShift) {
+                const prev = row.buttons[currentBtnIndex - 1];
+                if (prev) {
+                  e.preventDefault();
+                  focusButton(row.id, prev.id);
+                } else if (currentRowIndex > 0) {
+                  const prevRow = displayRows[currentRowIndex - 1];
+                  const target = prevRow.buttons[prevRow.buttons.length - 1];
+                  if (target) {
+                    e.preventDefault();
+                    focusButton(prevRow.id, target.id);
+                  }
+                }
+              } else {
+                const next = row.buttons[currentBtnIndex + 1];
+                if (next) {
+                  e.preventDefault();
+                  focusButton(row.id, next.id);
+                } else if (displayRows[currentRowIndex + 1]?.buttons[0]) {
+                  e.preventDefault();
+                  const target = displayRows[currentRowIndex + 1].buttons[0];
+                  focusButton(displayRows[currentRowIndex + 1].id, target.id);
+                }
+              }
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              const next = row.buttons[currentBtnIndex + 1];
+              if (next) document.getElementById(`kbd-${row.id}-${next.id}`)?.focus();
+            } else if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const prev = row.buttons[currentBtnIndex - 1];
+              if (prev) document.getElementById(`kbd-${row.id}-${prev.id}`)?.focus();
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              const prevRow = displayRows[currentRowIndex - 1];
+              if (prevRow && prevRow.buttons[currentBtnIndex]) {
+                document.getElementById(`kbd-${prevRow.id}-${prevRow.buttons[currentBtnIndex].id}`)?.focus();
+              }
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              const nextRow = displayRows[currentRowIndex + 1];
+              if (nextRow && nextRow.buttons[currentBtnIndex]) {
+                document.getElementById(`kbd-${nextRow.id}-${nextRow.buttons[currentBtnIndex].id}`)?.focus();
+              }
+            } else if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              if (isPreviewMode && onButtonClick) {
+                onButtonClick(button);
+              } else if (!readOnly && !isPreviewMode) {
+                handleTextEditClick(button.id);
+              }
+            } else if (e.key === 'Escape') {
+              setEditingButton(null);
+            }
+          }}
+          id={`kbd-${row.id}-${button.id}`}
+          tabIndex={0}
+          role="button"
+          aria-label={`Inline keyboard button ${index + 1}: ${button.text || "(empty)"}`}
+          aria-pressed={false}
+          className={clsx(
+            "w-full bg-telegram-button hover:bg-telegram-button/80 text-telegram-buttonText border-none rounded-md py-2 px-3 text-[15px] font-medium transition-colors relative overflow-hidden",
+            callbackTooLong && "ring-1 ring-destructive/60"
+          )}
+          title={readOnly ? "仅供预览" : isPreviewMode ? "点击执行操作" : "双击编辑文本"}
+        >
+          {!readOnly && !isPreviewMode && editingButton === button.id ? (
+            <input
+              type="text"
+              value={button.text}
+              onChange={(e) => handleTextChange(row.id, button.id, e.target.value)}
+              onBlur={() => setEditingButton(null)}
+              onPaste={handlePaste}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setEditingButton(null);
+                }
+                if (e.key === 'Escape') {
+                  setEditingButton(null);
+                }
+              }}
+              aria-label="Edit button text"
+              autoFocus
+              className="w-full bg-transparent outline-none text-center"
+              maxLength={30}
+            />
+          ) : (
+            <span className="truncate block">{button.text}</span>
+          )}
+          {callbackTooLong && (
+            <span
+              className="absolute bottom-1 right-1 text-[10px] text-destructive bg-white/90 rounded px-1 shadow-sm"
+              role="status"
+              aria-live="polite"
+            >
+              超过 64B
+            </span>
+          )}
+        </button>
+        {!readOnly && (
+          <>
+            {button.linked_screen_id && (
+              <div
+                className="absolute -top-1 -left-1 w-3 h-3 bg-green-500 rounded-full opacity-0 pointer-events-none transition-opacity group-hover:opacity-90"
+                title="已配置跳转模版"
+              />
+            )}
+            {button.url && (
+              <div
+                className="absolute -top-1 -left-1 w-3 h-3 bg-blue-500 rounded-full opacity-0 pointer-events-none transition-opacity group-hover:opacity-90"
+                title="已配置URL链接"
+              />
+            )}
+            {!button.url && !button.linked_screen_id && (
+              <div
+                className="absolute -top-1 -left-1 w-3 h-3 bg-yellow-500 rounded-full opacity-0 pointer-events-none transition-opacity group-hover:opacity-90"
+                title="未配置跳转目标"
+              />
+            )}
+
+            <div className="absolute -top-3 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-50">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEditClick(row, button, e.currentTarget);
+                }}
+                className="w-6 h-6 bg-white text-black rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform border border-gray-200"
+                aria-label="Edit button"
+                title="配置按钮跳转"
+              >
+                <Settings className="w-3 h-3" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteButton?.(row.id, button.id);
+                  const nextFocus = getNextFocusAfterDelete(row.id, button.id);
+                  if (nextFocus) {
+                    focusButton(nextFocus.rowId, nextFocus.buttonId);
+                  }
+                }}
+                className="w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform border border-red-600"
+                aria-label="Delete button"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <>
+      {selectedButton && (
+        <ButtonEditDialog
+          open={editDialogOpen}
+          onOpenChange={handleDialogOpenChange}
+          button={selectedButton.button}
+          onSave={handleSaveButton}
+          screens={screens}
+        />
+      )}
+      <div
+        className={clsx(
+          "space-y-4 mt-4",
+          displayRows.length > 6 && "max-h-[480px] overflow-y-auto pr-1",
+          !readOnly && (rowOverflow || buttonOverflow) && "rounded-md ring-1 ring-amber-400/50 p-2"
+        )}
+        data-testid="inline-keyboard"
+      >
+        {!readOnly && overflowMessages.length > 0 && (
+          <div
+            className="rounded-md border border-amber-400/40 bg-amber-50 text-amber-900 text-xs px-3 py-2 space-y-1"
+            role="status"
+            aria-live="polite"
+          >
+            {overflowMessages.map((msg) => (
+              <div key={msg}>{msg}</div>
+            ))}
+          </div>
+        )}
+        {!readOnly && validationErrors.length > 0 && (
+          <div
+            className="rounded-md border border-destructive/30 bg-destructive/10 text-destructive text-xs px-3 py-2 space-y-1"
+            role="status"
+            aria-live="polite"
+          >
+            {validationErrors.map((msg, idx) => (
+              <div key={`${msg}-${idx}`}>{msg}</div>
+            ))}
+          </div>
+        )}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={displayRows.map((row) => `row:${row.id}`)} strategy={verticalListSortingStrategy}>
+            {displayRows.map((row) => (
+              <SortableRow key={row.id} row={row} />
+            ))}
+          </SortableContext>
+        </DndContext>
+      </div>
+    </>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison for performance
+  if (prevProps.isPreviewMode !== nextProps.isPreviewMode) return false;
+  if (prevProps.readOnly !== nextProps.readOnly) return false;
+  if (prevProps.keyboard !== nextProps.keyboard) return false; // Shallow check for array ref
+
+  // Deep check for keyboard content if refs are different but content might be same?
+  // For now, rely on parent passing new reference on change.
+
+  return true;
+});
+
+export default InlineKeyboard;

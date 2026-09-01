@@ -1,0 +1,14 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  sources_telegram_channels.txt — Telegram channels to monitor
+#
+#  Format: one link per line (https://t.me/... or @username)
+#  Empty lines and lines starting with # are ignored.
+#
+#  Copy this file to sources_telegram_channels.txt and add your channels.
+#  Any niche works — AI, marketing, finance, sports, fashion, etc.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Examples (replace with your own):
+https://t.me/example_channel_1
+https://t.me/example_channel_2
+https://t.me/example_channel_3
