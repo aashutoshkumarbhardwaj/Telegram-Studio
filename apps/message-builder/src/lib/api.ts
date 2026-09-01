@@ -1,16 +1,21 @@
 /**
  * Heyaaashu Studio API Client.
  * Connects Visual Editor to backend PostSchema API with authentication & local storage fallback.
+ * Always resolves to relative same-origin `/api` by default in both development (via Vite proxy)
+ * and production (via reverse proxy / aiohttp).
  */
 
 import { DraftListItem, PostSchema } from '@/types/postSchema';
 
-// Prioritize relative /api via Vite proxy, fallback to direct 127.0.0.1:8000/api
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' && window.location.origin.includes(':8080')
-    ? '/api'
-    : 'http://127.0.0.1:8000/api');
+export function getApiBaseUrl(): string {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  return '/api';
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 const LOCAL_STORAGE_KEY = 'heyaaashu_studio_drafts_v1';
 const AUTH_TOKEN_KEY = 'heyaaashu_studio_auth_token';
