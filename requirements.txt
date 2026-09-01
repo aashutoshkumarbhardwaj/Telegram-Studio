@@ -1,0 +1,15 @@
+# Heyaaashu Studio Python Dependencies
+aiogram>=3.4.0
+aiohttp>=3.9.0
+httpx>=0.27.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+feedparser>=6.0.0
+jsonschema>=4.20.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+apscheduler>=3.10.0
+tzlocal>=5.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

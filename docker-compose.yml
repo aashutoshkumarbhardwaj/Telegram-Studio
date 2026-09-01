@@ -1,0 +1,58 @@
+services:
+  # ─── 1. FRONTEND REVERSE PROXY & VISUAL STUDIO ──────────────────────────────
+  frontend:
+    build:
+      context: ./apps/message-builder
+      dockerfile: Dockerfile
+    container_name: heyaaashu-studio-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── 2. UNIFIED BACKEND API SERVER ──────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: heyaaashu-studio-api
+    command: ["python", "-m", "apps.api.server"]
+    environment:
+      - DATABASE_PATH=/app/data/studio.db
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - studio_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ─── 3. SINGLE TELEGRAM POLLING BOT RECEIVER ────────────────────────────────
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: heyaaashu-studio-bot
+    command: ["python", "-m", "apps.bot.main"]
+    environment:
+      - DATABASE_PATH=/app/data/studio.db
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - studio_data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  studio_data:
+    name: studio_data

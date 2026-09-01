@@ -6,6 +6,7 @@ Built on aiohttp.web for zero-dependency native async execution.
 
 import json
 import logging
+from typing import Any, Dict, List, Optional
 from aiohttp import web
 from pydantic import ValidationError
 
@@ -182,12 +183,22 @@ async def publish_post_endpoint(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=_cors_headers())
 
 
+async def health_check(request: web.Request) -> web.Response:
+    """GET /api/health — Health check endpoint for Docker & reverse proxy."""
+    return web.json_response({
+        "status": "healthy",
+        "service": "heyaaashu-studio-api",
+        "version": "1.0.0",
+    }, headers=_cors_headers())
+
+
 def create_app(db: Optional[StudioDatabase] = None) -> web.Application:
     """Creates the aiohttp web application."""
     app = web.Application()
     app["db"] = db or StudioDatabase()
 
     app.router.add_options("/{tail:.*}", handle_options)
+    app.router.add_get("/api/health", health_check)
     app.router.add_get("/api/drafts", get_drafts)
     app.router.add_get("/api/drafts/{id}", get_draft_by_id)
     app.router.add_post("/api/drafts", create_draft)

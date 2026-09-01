@@ -1,6 +1,6 @@
 """
 Tests for Heyaaashu Studio API Server.
-Verifies canonical PostSchema validation on writes, draft CRUD, preview generation, and publish validation.
+Verifies canonical PostSchema validation on writes, draft CRUD, preview generation, health checks, and publish validation.
 """
 
 import pytest
@@ -8,6 +8,23 @@ from aiohttp.test_utils import TestClient, TestServer
 from apps.api.server import create_app
 from packages.post_schema import ContentType, PostSchema
 from packages.shared.db import StudioDatabase
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint(tmp_path):
+    test_db = StudioDatabase(db_path=str(tmp_path / "test_api_health.db"))
+    app = create_app(db=test_db)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+
+    try:
+        resp = await client.get("/api/health")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["status"] == "healthy"
+        assert data["service"] == "heyaaashu-studio-api"
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio
