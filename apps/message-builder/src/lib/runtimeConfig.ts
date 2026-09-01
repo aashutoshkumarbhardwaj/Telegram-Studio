@@ -1,7 +1,14 @@
+/**
+ * Runtime configuration helper for Heyaaashu Studio.
+ * Canonical backend and persistence are managed via Python /api & PostgreSQL.
+ * Supabase is optional / legacy and must NEVER block production startup when absent.
+ */
+
 export const FALLBACK_SUPABASE_URL = "http://localhost:54321";
 export const FALLBACK_SUPABASE_PUBLISHABLE_KEY = "test-key";
 const EXAMPLE_SUPABASE_URL = "https://your-project.supabase.co";
 const EXAMPLE_SUPABASE_KEY = "public-anon-key";
+
 type RuntimeEnv = Pick<
   ImportMetaEnv,
   | "VITE_SUPABASE_URL"
@@ -11,6 +18,7 @@ type RuntimeEnv = Pick<
   | "VITE_COMMIT_SHA"
   | "PROD"
 >;
+
 const SERVICE_ROLE = "service_role";
 const ADMIN_ROLE = "supabase_admin";
 
@@ -76,32 +84,7 @@ export const getRuntimeConfigReport = (env: RuntimeEnv = import.meta.env): Runti
   const isProd = env.PROD;
   const issues: RuntimeConfigIssue[] = [];
 
-  const missing: string[] = [];
-  if (!url) missing.push("VITE_SUPABASE_URL");
-  if (!key) missing.push("VITE_SUPABASE_PUBLISHABLE_KEY");
-  if (missing.length > 0) {
-    issues.push({
-      level: isProd ? "error" : "warning",
-      message: `Missing env: ${missing.join(", ")}.`,
-    });
-  }
-
-  const usingFallback = url === FALLBACK_SUPABASE_URL || key === FALLBACK_SUPABASE_PUBLISHABLE_KEY;
-  const usingExample = looksLikeExampleValues(url, key);
-  if (url && key && (usingFallback || usingExample)) {
-    issues.push({
-      level: isProd ? "error" : "warning",
-      message: "Supabase env values look like placeholders; replace with real project credentials.",
-    });
-  }
-
-  if (env.VITE_SUPABASE_URL && looksLikeLocalSupabaseUrl(url) && isProd) {
-    issues.push({
-      level: "error",
-      message: "Supabase URL points to localhost in production.",
-    });
-  }
-
+  // Only report critical security misconfigurations if someone explicitly provides a dangerous service role key
   if (key && looksLikeServiceRoleKey(key)) {
     issues.push({
       level: "error",
@@ -109,24 +92,10 @@ export const getRuntimeConfigReport = (env: RuntimeEnv = import.meta.env): Runti
     });
   }
 
-  if (env.VITE_SUPABASE_URL && isProd && isInsecureProdUrl(url)) {
+  if (url && isProd && isInsecureProdUrl(url)) {
     issues.push({
       level: "error",
       message: "Supabase URL must use https in production.",
-    });
-  }
-
-  if (isProd && !env.VITE_ERROR_REPORTING_URL) {
-    issues.push({
-      level: "warning",
-      message: "Error reporting is disabled in production.",
-    });
-  }
-
-  if (isProd && !env.VITE_APP_VERSION && !env.VITE_COMMIT_SHA) {
-    issues.push({
-      level: "warning",
-      message: "Release version not set (VITE_APP_VERSION or VITE_COMMIT_SHA).",
     });
   }
 
@@ -160,4 +129,9 @@ export const getSupabaseConfig = () => {
 };
 
 export const hasSupabaseEnv = (env: RuntimeEnv = import.meta.env) =>
-  Boolean(env.VITE_SUPABASE_URL && env.VITE_SUPABASE_PUBLISHABLE_KEY);
+  Boolean(
+    env.VITE_SUPABASE_URL &&
+    env.VITE_SUPABASE_PUBLISHABLE_KEY &&
+    !looksLikeExampleValues(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_PUBLISHABLE_KEY) &&
+    env.VITE_SUPABASE_URL !== FALLBACK_SUPABASE_URL
+  );

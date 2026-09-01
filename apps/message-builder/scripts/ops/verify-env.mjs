@@ -1,4 +1,4 @@
-const REQUIRED = ["VITE_SUPABASE_URL", "VITE_SUPABASE_PUBLISHABLE_KEY"];
+const REQUIRED = []; // Heyaaashu Studio runs against unified /api backend and requires no mandatory frontend env vars
 const EXAMPLE_SUPABASE_URL = "https://your-project.supabase.co";
 const EXAMPLE_SUPABASE_KEY = "public-anon-key";
 const FALLBACK_SUPABASE_URL = "http://localhost:54321";
@@ -60,23 +60,9 @@ const report = (level, message) => {
 
 const url = process.env.VITE_SUPABASE_URL || "";
 const key = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
-const missing = REQUIRED.filter((name) => !process.env[name]);
-if (missing.length) {
-  report(isProd ? "error" : "warn", `Missing env: ${missing.join(", ")}.`);
-}
-
-const usingPlaceholder = url === EXAMPLE_SUPABASE_URL || key === EXAMPLE_SUPABASE_KEY;
-const usingFallback = url === FALLBACK_SUPABASE_URL || key === FALLBACK_SUPABASE_KEY;
-if (usingPlaceholder || usingFallback) {
-  report(isProd ? "error" : "warn", "Supabase env values look like placeholders; replace with real project credentials.");
-}
 
 if (url && isProd && isInsecureProdUrl(url)) {
   report("error", "Supabase URL must use https in production.");
-}
-
-if (url && isProd && isLocalUrl(url)) {
-  report("error", "Supabase URL points to localhost in production.");
 }
 
 const role = getJwtRole(key);

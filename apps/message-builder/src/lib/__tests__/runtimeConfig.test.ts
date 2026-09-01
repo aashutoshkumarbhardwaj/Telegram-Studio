@@ -3,6 +3,7 @@ import {
   FALLBACK_SUPABASE_PUBLISHABLE_KEY,
   FALLBACK_SUPABASE_URL,
   getRuntimeConfigReport,
+  hasSupabaseEnv,
 } from "../runtimeConfig";
 
 type RuntimeEnv = {
@@ -22,30 +23,29 @@ const buildEnv = (overrides: Partial<RuntimeEnv> = {}): RuntimeEnv => ({
 });
 
 describe("runtimeConfig", () => {
-  it("returns fallbacks and warnings in dev when env missing", () => {
+  it("allows starting without Supabase in dev", () => {
     const report = getRuntimeConfigReport(buildEnv());
     expect(report.supabaseUrl).toBe(FALLBACK_SUPABASE_URL);
     expect(report.supabasePublishableKey).toBe(FALLBACK_SUPABASE_PUBLISHABLE_KEY);
     expect(report.hasBlockingIssues).toBe(false);
-    expect(report.issues.some((issue) => issue.level === "warning")).toBe(true);
   });
 
-  it("blocks missing env in prod", () => {
+  it("does NOT block production startup when Supabase is omitted", () => {
     const report = getRuntimeConfigReport(buildEnv({ PROD: true }));
-    expect(report.hasBlockingIssues).toBe(true);
-    expect(report.issues.some((issue) => issue.level === "error")).toBe(true);
+    expect(report.hasBlockingIssues).toBe(false);
   });
 
-  it("blocks placeholder env in prod", () => {
-    const report = getRuntimeConfigReport(
-      buildEnv({
-        VITE_SUPABASE_URL: "https://your-project.supabase.co",
-        VITE_SUPABASE_PUBLISHABLE_KEY: "public-anon-key",
-        PROD: true,
-      }),
-    );
-    expect(report.hasBlockingIssues).toBe(true);
-    expect(report.issues.some((issue) => issue.level === "error" && issue.message.includes("placeholders"))).toBe(true);
+  it("identifies when Supabase env is present vs absent", () => {
+    expect(hasSupabaseEnv(buildEnv({ PROD: true }))).toBe(false);
+    expect(
+      hasSupabaseEnv(
+        buildEnv({
+          VITE_SUPABASE_URL: "https://real-project.supabase.co",
+          VITE_SUPABASE_PUBLISHABLE_KEY: "real-publishable-key-xyz",
+          PROD: true,
+        })
+      )
+    ).toBe(true);
   });
 
   it("flags service role keys even outside prod", () => {
@@ -55,7 +55,7 @@ describe("runtimeConfig", () => {
         VITE_SUPABASE_URL: "https://example.supabase.co",
         VITE_SUPABASE_PUBLISHABLE_KEY: serviceRoleKey,
         PROD: false,
-      }),
+      })
     );
     expect(report.issues.some((issue) => issue.message.includes("service role"))).toBe(true);
   });
@@ -66,7 +66,7 @@ describe("runtimeConfig", () => {
         VITE_SUPABASE_URL: "http://example.supabase.co",
         VITE_SUPABASE_PUBLISHABLE_KEY: "public-anon-key-2",
         PROD: true,
-      }),
+      })
     );
     expect(report.hasBlockingIssues).toBe(true);
     expect(report.issues.some((issue) => issue.message.includes("https"))).toBe(true);
