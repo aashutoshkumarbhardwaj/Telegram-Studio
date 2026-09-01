@@ -3,16 +3,16 @@ New Post Creator Router for Heyaaashu Studio Bot.
 Handles /new command, category selection, raw text/URL ingestion, and preview generation.
 """
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from apps.bot.keyboards import get_content_type_keyboard, get_preview_action_keyboard
 from packages.ai.extractor import extract_post_schema_from_input
 from packages.formatter import format_post_text
-from packages.post_schema import ContentType
+from packages.post_schema import ContentType, PostSchema
 from packages.shared.db import StudioDatabase
 
 router = Router()
@@ -24,6 +24,26 @@ class CreatePostFSM(StatesGroup):
     editing_body = State()
     adding_button = State()
     adding_source = State()
+
+
+def render_preview_message(post: PostSchema, draft_id: int) -> str:
+    """Renders the full preview text including attached buttons and metadata."""
+    formatted_text = format_post_text(post, include_header=True)
+    
+    parts = [
+        "👀 <b>POST PREVIEW</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        formatted_text,
+        "━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if post.buttons:
+        btn_lines = [f"• <b>[{b.text}]</b> → <code>{b.url}</code>" for b in post.buttons]
+        parts.append("🔗 <b>Attached Buttons:</b>\n" + "\n".join(btn_lines))
+        parts.append("━━━━━━━━━━━━━━━━━━━━")
+
+    parts.append("<i>Use controls below to edit, improve, or publish:</i>")
+    return "\n".join(parts)
 
 
 @router.message(Command("new"))
@@ -88,15 +108,11 @@ async def handle_raw_content_input(message: Message, state: FSMContext, db: Stud
     await state.clear()
 
     # 3. Format message text for visual preview
-    formatted_preview = format_post_text(post, include_header=True)
-
-    # 4. Display Post Preview with action controls
-    preview_header = "👀 <b>POST PREVIEW</b>\n━━━━━━━━━━━━━━━━━━━━\n"
-    preview_footer = "\n━━━━━━━━━━━━━━━━━━━━\n<i>Review your post draft below and select an action:</i>"
+    preview_content = render_preview_message(post, draft_id)
 
     await status_msg.delete()
     await message.answer(
-        f"{preview_header}{formatted_preview}{preview_footer}",
+        preview_content,
         parse_mode="HTML",
         reply_markup=get_preview_action_keyboard(draft_id),
         disable_web_page_preview=False,
