@@ -166,8 +166,13 @@ async def publish_post_endpoint(request: web.Request) -> web.Response:
                 message_id=res.get("message_id", 0),
             )
 
+        message_id = res.get("message_id")
+        target_chat_id = str(res.get("chat_id") or channel_id)
+
         return web.json_response({
             "success": True,
+            "message_id": message_id,
+            "channel_id": target_chat_id,
             "publish_result": res,
         }, headers=_cors_headers())
     except ValidationError as e:
@@ -197,4 +202,5 @@ def create_app(db: Optional[StudioDatabase] = None) -> web.Application:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = create_app()
-    web.run_app(app, host="127.0.0.1", port=8000)
+    web.run_app(app, host=None, port=8000)
+

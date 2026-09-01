@@ -5,12 +5,20 @@
 
 import { DraftListItem, PostSchema } from '@/types/postSchema';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+// Prioritize relative /api via Vite proxy, fallback to direct 127.0.0.1:8000/api
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' && window.location.origin.includes(':8080')
+    ? '/api'
+    : 'http://127.0.0.1:8000/api');
+
 const LOCAL_STORAGE_KEY = 'heyaaashu_studio_drafts_v1';
 
 export async function fetchDrafts(): Promise<DraftListItem[]> {
   try {
-    const res = await fetch(`${API_BASE_URL}/drafts`);
+    const res = await fetch(`${API_BASE_URL}/drafts`, {
+      headers: { Accept: 'application/json' },
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.success && Array.isArray(data.drafts)) {
@@ -33,9 +41,13 @@ export async function fetchDrafts(): Promise<DraftListItem[]> {
   return [];
 }
 
-export async function fetchDraftById(id: number): Promise<{ schema: PostSchema; status: string } | null> {
+export async function fetchDraftById(
+  id: number
+): Promise<{ schema: PostSchema; status: string } | null> {
   try {
-    const res = await fetch(`${API_BASE_URL}/drafts/${id}`);
+    const res = await fetch(`${API_BASE_URL}/drafts/${id}`, {
+      headers: { Accept: 'application/json' },
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.schema) {
@@ -68,7 +80,10 @@ export async function saveDraftPost(
 
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
       body: JSON.stringify({ schema: post }),
     });
 
@@ -79,7 +94,11 @@ export async function saveDraftPost(
       }
     } else {
       const errData = await res.json().catch(() => ({}));
-      return { success: false, draftId: draftId || 0, error: errData.error || 'Failed to save draft' };
+      return {
+        success: false,
+        draftId: draftId || 0,
+        error: errData.error || `HTTP ${res.status}: Failed to save draft`,
+      };
     }
   } catch (e: any) {
     console.warn('Backend API failed, saving to local storage:', e);
@@ -128,20 +147,36 @@ export async function deleteDraftById(id: number): Promise<boolean> {
 export async function publishDraftToTelegram(
   post: PostSchema,
   draftId?: number
-): Promise<{ success: boolean; messageId?: number; error?: string }> {
+): Promise<{ success: boolean; messageId?: number; channelId?: string; error?: string }> {
   try {
     const res = await fetch(`${API_BASE_URL}/publish`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
       body: JSON.stringify({ schema: post, draft_id: draftId }),
     });
 
-    const data = await res.json();
-    if (res.ok && data.success) {
-      return { success: true, messageId: data.publish_result?.message_id };
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errData.error || `HTTP ${res.status}: Publish rejected`,
+      };
     }
-    return { success: false, error: data.error || 'Publish rejected by Telegram' };
+
+    const data = await res.json();
+    if (data && data.success) {
+      return {
+        success: true,
+        messageId: data.message_id || data.publish_result?.message_id,
+        channelId: data.channel_id || String(data.publish_result?.chat_id || ''),
+      };
+    }
+    return { success: false, error: data?.error || 'Publish rejected by Telegram' };
   } catch (e: any) {
-    return { success: false, error: e.message || 'Network error communicating with publisher' };
+    console.error('Publish fetch error:', e);
+    return { success: false, error: e.message || 'Failed to fetch' };
   }
 }

@@ -94,3 +94,34 @@ async def test_preview_generation(tmp_path):
         assert data["is_valid"] is True
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_publish_endpoint_validation_and_response(tmp_path):
+    test_db = StudioDatabase(db_path=str(tmp_path / "test_api_pub.db"))
+    app = create_app(db=test_db)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+
+    try:
+        # Bad schema publish rejection
+        bad_resp = await client.post("/api/publish", json={"schema": {"title": ""}})
+        assert bad_resp.status == 400
+        bad_data = await bad_resp.json()
+        assert bad_data["success"] is False
+
+        # Valid schema publish check
+        valid_post = {
+            "content_type": "ai_news",
+            "title": "Gemini 2.5 Release Test",
+            "body": "Multimodal reasoning test.",
+            "buttons": [{"text": "Read Source", "url": "https://blog.google"}],
+        }
+        pub_resp = await client.post("/api/publish", json={"schema": valid_post})
+        assert pub_resp.status == 200
+        pub_data = await pub_resp.json()
+        assert pub_data["success"] is True
+        assert "message_id" in pub_data
+        assert "channel_id" in pub_data
+    finally:
+        await client.close()
