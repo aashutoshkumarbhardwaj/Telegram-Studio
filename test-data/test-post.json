@@ -1,0 +1,34 @@
+{
+  "content_type": "ai_news",
+  "title": "Gemini Crosses 1 Billion Users",
+  "body": "Google says Gemini has crossed 1 billion monthly users.\n\nThe bigger shift is multimodal AI:\n\n🎙 Voice\n📸 Camera\n🖥 Screen sharing\n🖼 Image generation\n\nAI interfaces are moving beyond simple chatbots.",
+  "parse_mode": "HTML",
+  "source": {
+    "title": "Google Official Blog",
+    "url": "https://blog.google/"
+  },
+  "media": [],
+  "buttons": [
+    {
+      "text": "📚 Read Source",
+      "url": "https://blog.google/"
+    }
+  ],
+  "hashtags": [
+    "AI",
+    "Gemini",
+    "Tech"
+  ],
+  "keywords": [
+    "Gemini",
+    "Multimodal AI",
+    "Google"
+  ],
+  "image_prompt": null,
+  "verification": {
+    "status": "verified",
+    "sources": [
+      "https://blog.google/"
+    ]
+  }
+}

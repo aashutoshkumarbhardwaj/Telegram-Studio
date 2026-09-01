@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HeyaaashuStudioPost",
+  "type": "object",
+  "required": [
+    "content_type",
+    "title",
+    "body",
+    "parse_mode",
+    "buttons"
+  ],
+  "properties": {
+    "content_type": {
+      "type": "string",
+      "enum": [
+        "ai_news",
+        "job",
+        "internship",
+        "hackathon",
+        "ai_tool",
+        "career",
+        "resource"
+      ],
+      "description": "Category of the content"
+    },
+    "title": {
+      "type": "string",
+      "description": "Headline or role or event name"
+    },
+    "body": {
+      "type": "string",
+      "description": "Main post content formatted in HTML or MarkdownV2"
+    },
+    "parse_mode": {
+      "type": "string",
+      "enum": [
+        "HTML",
+        "MarkdownV2"
+      ],
+      "default": "HTML",
+      "description": "Telegram parse mode for the text/caption"
+    },
+    "source": {
+      "description": "Source URL or structured source details",
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "uri"
+        },
+        {
+          "type": "object",
+          "required": ["url"],
+          "properties": {
+            "title": { "type": "string" },
+            "url": { "type": "string", "format": "uri" }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "media": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "url_or_path"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["photo", "video", "document", "animation"]
+          },
+          "url_or_path": { "type": "string" },
+          "file_id": { "type": "string" }
+        }
+      },
+      "default": []
+    },
+    "buttons": {
+      "type": "array",
+      "description": "List of inline buttons or rows of inline buttons",
+      "items": {
+        "type": "object",
+        "required": [
+          "text",
+          "url"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "default": []
+    },
+    "hashtags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "image_prompt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["verified", "needs_verification", "unverified"],
+          "default": "verified"
+        },
+        "sources": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "default": {
+        "status": "verified",
+        "sources": []
+      }
+    }
+  }
+}

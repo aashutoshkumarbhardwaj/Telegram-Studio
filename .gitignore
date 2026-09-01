@@ -1,31 +1,53 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
 .venv/
 venv/
+ENV/
+env/
 
 # Node
 node_modules/
 dist/
 build/
 .next/
+coverage/
 
-# Environment
+# Environment & Secrets
 .env
 .env.*
 !.env.example
+!.env.template
+*.pem
+*.key
 
-# Databases / local data
+# Telethon & Bot Sessions
+*.session
+*.session-journal
+userbot.session
+
+# Databases / Local Data
 *.db
 *.sqlite
 *.sqlite3
+posts.db
+posting_bot.db
+data/
+media/
+downloads/
 
 # OS
 .DS_Store
+Thumbs.db
 
 # IDE
 .vscode/
 .idea/
 
-# Logs
+# Logs & Temp
 *.log
+*.tmp
+scratch/
