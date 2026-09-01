@@ -5,6 +5,7 @@ Handles Edit, Improve, Regenerate, Add Image, Add Buttons, Add Source, Publish, 
 
 import logging
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -46,6 +47,22 @@ def render_preview_message(post: PostSchema, draft_id: int) -> str:
 
     parts.append("<i>Use controls below to edit, improve, or publish:</i>")
     return "\n".join(parts)
+
+
+async def safe_edit_preview_message(callback: CallbackQuery, text: str, draft_id: int):
+    """Safely updates the preview message ignoring 'message is not modified' errors."""
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_preview_action_keyboard(draft_id),
+            disable_web_page_preview=False,
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e).lower():
+            pass
+        else:
+            raise e
 
 
 # ─── 1. PUBLISH ──────────────────────────────────────────────────────────────
@@ -151,13 +168,7 @@ async def cb_improve_post(callback: CallbackQuery, db: StudioDatabase):
     post = improve_post_schema(post)
     db.update_draft_post(draft_id, post)
     preview_content = render_preview_message(post, draft_id)
-
-    await callback.message.edit_text(
-        preview_content,
-        parse_mode="HTML",
-        reply_markup=get_preview_action_keyboard(draft_id),
-        disable_web_page_preview=False,
-    )
+    await safe_edit_preview_message(callback, preview_content, draft_id)
     await callback.answer("Post improved!")
 
 
@@ -172,13 +183,7 @@ async def cb_regenerate_post(callback: CallbackQuery, db: StudioDatabase):
     post = regenerate_post_schema(post)
     db.update_draft_post(draft_id, post)
     preview_content = render_preview_message(post, draft_id)
-
-    await callback.message.edit_text(
-        preview_content,
-        parse_mode="HTML",
-        reply_markup=get_preview_action_keyboard(draft_id),
-        disable_web_page_preview=False,
-    )
+    await safe_edit_preview_message(callback, preview_content, draft_id)
     await callback.answer("Post regenerated!")
 
 
