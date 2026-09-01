@@ -1,6 +1,6 @@
 /**
  * Heyaaashu Studio API Client.
- * Connects Visual Editor to backend PostSchema API with local storage fallback.
+ * Connects Visual Editor to backend PostSchema API with authentication & local storage fallback.
  */
 
 import { DraftListItem, PostSchema } from '@/types/postSchema';
@@ -13,11 +13,60 @@ const API_BASE_URL =
     : 'http://127.0.0.1:8000/api');
 
 const LOCAL_STORAGE_KEY = 'heyaaashu_studio_drafts_v1';
+const AUTH_TOKEN_KEY = 'heyaaashu_studio_auth_token';
+
+export function getStudioAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+export function setStudioAuthToken(token: string): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+  }
+}
+
+export function clearStudioAuthToken(): void {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+  }
+}
+
+function getRequestHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  const token = getStudioAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+    headers['X-Studio-Auth'] = token;
+  }
+  return headers;
+}
+
+export async function loginStudio(token: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      setStudioAuthToken(data.token || token);
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'Authentication failed' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Authentication request failed' };
+  }
+}
 
 export async function fetchDrafts(): Promise<DraftListItem[]> {
   try {
     const res = await fetch(`${API_BASE_URL}/drafts`, {
-      headers: { Accept: 'application/json' },
+      headers: getRequestHeaders(),
     });
     if (res.ok) {
       const data = await res.json();
@@ -46,7 +95,7 @@ export async function fetchDraftById(
 ): Promise<{ schema: PostSchema; status: string } | null> {
   try {
     const res = await fetch(`${API_BASE_URL}/drafts/${id}`, {
-      headers: { Accept: 'application/json' },
+      headers: getRequestHeaders(),
     });
     if (res.ok) {
       const data = await res.json();
@@ -80,10 +129,7 @@ export async function saveDraftPost(
 
     const res = await fetch(url, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers: getRequestHeaders(),
       body: JSON.stringify({ schema: post }),
     });
 
@@ -131,7 +177,10 @@ export async function saveDraftPost(
 
 export async function deleteDraftById(id: number): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE_URL}/drafts/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE_URL}/drafts/${id}`, {
+      method: 'DELETE',
+      headers: getRequestHeaders(),
+    });
     if (res.ok) return true;
   } catch (e) {
     // ignore
@@ -151,10 +200,7 @@ export async function publishDraftToTelegram(
   try {
     const res = await fetch(`${API_BASE_URL}/publish`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers: getRequestHeaders(),
       body: JSON.stringify({ schema: post, draft_id: draftId }),
     });
 

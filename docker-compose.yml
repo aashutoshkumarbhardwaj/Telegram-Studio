@@ -12,7 +12,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ─── 2. UNIFIED BACKEND API SERVER ──────────────────────────────────────────
+  # ─── 2. UNIFIED BACKEND API SERVER (Internal Network Only) ──────────────────
   api:
     build:
       context: .
@@ -23,6 +23,9 @@ services:
       - DATABASE_PATH=/app/data/studio.db
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - STUDIO_AUTH_TOKEN=${STUDIO_AUTH_TOKEN:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:
       - studio_data:/app/data
@@ -34,7 +37,7 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # ─── 3. SINGLE TELEGRAM POLLING BOT RECEIVER ────────────────────────────────
+  # ─── 3. SINGLE TELEGRAM POLLING BOT RECEIVER (Internal Network Only) ────────
   bot:
     build:
       context: .
@@ -45,6 +48,8 @@ services:
       - DATABASE_PATH=/app/data/studio.db
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - STUDIO_AUTH_TOKEN=${STUDIO_AUTH_TOKEN:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:
       - studio_data:/app/data

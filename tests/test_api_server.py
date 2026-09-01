@@ -1,9 +1,10 @@
 """
 Tests for Heyaaashu Studio API Server.
-Verifies canonical PostSchema validation on writes, draft CRUD, preview generation, health checks, and publish validation.
+Verifies canonical PostSchema validation on writes, draft CRUD, preview generation, health checks, authentication, and publish validation.
 """
 
 import pytest
+from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 from apps.api.server import create_app
 from packages.post_schema import ContentType, PostSchema
@@ -25,6 +26,55 @@ async def test_health_endpoint(tmp_path):
         assert data["service"] == "heyaaashu-studio-api"
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_authentication_protection(tmp_path):
+    test_db = StudioDatabase(db_path=str(tmp_path / "test_api_auth.db"))
+    with patch("apps.api.server.STUDIO_AUTH_TOKEN", "super_secret_test_token_123"):
+        app = create_app(db=test_db)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+
+        try:
+            # 1. Health is always public
+            h_resp = await client.get("/api/health")
+            assert h_resp.status == 200
+
+            # 2. Login endpoint allows valid token
+            login_resp = await client.post("/api/auth/login", json={"token": "super_secret_test_token_123"})
+            assert login_resp.status == 200
+            login_data = await login_resp.json()
+            assert login_data["success"] is True
+
+            # 3. Login endpoint rejects bad token
+            bad_login = await client.post("/api/auth/login", json={"token": "wrong_token"})
+            assert bad_login.status == 401
+
+            # 4. Drafts endpoint without auth returns 401
+            unauth_resp = await client.get("/api/drafts")
+            assert unauth_resp.status == 401
+            unauth_data = await unauth_resp.json()
+            assert unauth_data["success"] is False
+            assert "Unauthorized" in unauth_data["error"]
+
+            # 5. Drafts endpoint with Bearer auth succeeds
+            auth_resp = await client.get(
+                "/api/drafts",
+                headers={"Authorization": "Bearer super_secret_test_token_123"}
+            )
+            assert auth_resp.status == 200
+            auth_data = await auth_resp.json()
+            assert auth_data["success"] is True
+
+            # 6. Drafts endpoint with X-Studio-Auth header succeeds
+            header_auth_resp = await client.get(
+                "/api/drafts",
+                headers={"X-Studio-Auth": "super_secret_test_token_123"}
+            )
+            assert header_auth_resp.status == 200
+        finally:
+            await client.close()
 
 
 @pytest.mark.asyncio

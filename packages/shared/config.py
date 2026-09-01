@@ -45,6 +45,13 @@ LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "gpt-4o")
 LANGUAGE: str = os.getenv("LANGUAGE", os.getenv("CONTENT_LANGUAGE", "en"))
 CONTENT_LANGUAGE: str = os.getenv("CONTENT_LANGUAGE", LANGUAGE)
 
+# --- Studio Authentication & Security ---
+STUDIO_AUTH_TOKEN: str = os.getenv("STUDIO_AUTH_TOKEN", "").strip()
+SESSION_SECRET: str = os.getenv("SESSION_SECRET", "").strip()
+ALLOWED_ORIGINS: list[str] = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost,http://127.0.0.1").split(",") if o.strip()
+]
+
 
 def get_target_channel_id() -> str:
     """Returns the target channel ID/username configured for publishing."""

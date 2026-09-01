@@ -15,21 +15,20 @@ AI + Tech + Career Content Operating System & Visual Telegram Content Studio.
                         ┌───────────────────────────────────────────┐
                         │      heyaaashu-studio-frontend (Nginx)    │
                         │   • Serves compiled React SPA             │
-                        │   • Reverse proxies /api/* to backend     │
+                        │   • Security headers & reverse proxy      │
                         └─────────────┬─────────────────────────────┘
-                                      │  /api/*
+                                      │  /api/* (Internal Docker Network)
                                       ▼
                         ┌───────────────────────────────────────────┐
                         │        heyaaashu-studio-api (Python)      │
-                        │   • REST API, PostSchema validation       │
+                        │   • Authenticated REST API & Publishing   │
                         │   • Live Telegram preview & formatting    │
-                        │   • Direct Telegram channel publisher     │
                         └─────────────┬─────────────────────────────┘
                                       │
                                       ▼
                       ┌──────────────────────────────┐
                       │   studio_data (Docker Volume)│
-                      │   Persistent SQLite Database │
+                      │   Isolated SQLite Database   │
                       └───────────────┬──────────────┘
                                       │
                                       ▲
@@ -52,13 +51,16 @@ cp .env.example .env
 nano .env  # or vim .env
 ```
 
-Set your required environment variables in `.env`:
+Set your configuration in `.env`:
 ```env
-TELEGRAM_BOT_TOKEN=8210460024:AAEd21ZYkRhdYYHETRzYFEa-SvLi697CZz4
-TELEGRAM_CHANNEL_ID=-1003756584531
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+TELEGRAM_CHANNEL_ID=-100xxxxxxxxxx
+STUDIO_AUTH_TOKEN=your_secure_studio_password_or_token
+SESSION_SECRET=your_random_32_character_session_secret
 GEMINI_API_KEY=your_gemini_api_key_here
 DATABASE_PATH=/app/data/studio.db
 VITE_API_URL=/api
+ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
 ```
 
 ### 2. Start Full Stack
@@ -86,6 +88,15 @@ http://localhost
 
 > [!WARNING]
 > Running `docker compose down -v` removes the named Docker volume `studio_data` and will permanently delete all stored drafts and publishing history. Use standard `docker compose down` during normal maintenance.
+
+---
+
+## 🔒 Security Best Practices
+
+1. **Authentication**: Configure `STUDIO_AUTH_TOKEN` in `.env` to protect API endpoints from unauthorized publishing and draft modifications.
+2. **Network Isolation**: Backend API (`heyaaashu-studio-api`) and SQLite database are isolated within the internal Docker bridge network and never exposed directly to the public internet.
+3. **Security Headers**: Production Nginx includes `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`, and CSP headers.
+4. **Secrets Sanitization**: Never commit `.env` or session files to version control.
 
 ---
 
