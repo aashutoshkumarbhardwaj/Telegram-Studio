@@ -123,12 +123,22 @@ def format_post_text(post: PostSchema, include_header: bool = True) -> str:
     return "\n".join(parts)
 
 
+def is_valid_button_url(url: Optional[str]) -> bool:
+    """Validates that a URL is well-formed for Telegram inline keyboard buttons."""
+    if not url:
+        return False
+    clean = url.strip()
+    if clean.startswith(("tg://", "t.me/")):
+        return True
+    return bool(re.match(r"^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$", clean, re.IGNORECASE))
+
+
 def build_inline_keyboard(post: PostSchema, max_per_row: int = 2) -> Optional[Dict[str, Any]]:
     """
     Constructs Telegram inline keyboard markup from PostSchema buttons.
-    Filters out invalid buttons with missing URLs.
+    Filters out invalid buttons with missing or malformed URLs.
     """
-    valid_buttons = [b for b in post.buttons if b.url and b.url.strip().startswith(("http://", "https://", "tg://"))]
+    valid_buttons = [b for b in post.buttons if is_valid_button_url(b.url)]
     if not valid_buttons:
         return None
 

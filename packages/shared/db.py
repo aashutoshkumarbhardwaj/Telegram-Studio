@@ -1,6 +1,6 @@
 """
 Unified Database Layer for Heyaaashu Studio.
-Manages drafts, channels, published posts, and reaction counters.
+Manages drafts, channels, published posts, reaction counters, and research candidate cache.
 """
 
 import json
@@ -99,6 +99,25 @@ class StudioDatabase:
                 )
             """)
 
+            # Research Candidates Cache table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS research_cache (
+                    candidate_id TEXT PRIMARY KEY,
+                    category TEXT,
+                    title TEXT,
+                    summary TEXT,
+                    source_url TEXT,
+                    source_name TEXT,
+                    trust_tier INTEGER DEFAULT 2,
+                    verification_status TEXT DEFAULT 'verified',
+                    supporting_sources_json TEXT,
+                    metadata_json TEXT,
+                    score REAL DEFAULT 1.0,
+                    published_at TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Dynamic migrations to support existing PostingPost databases
             migrations = [
                 ("title", "TEXT"),
@@ -187,3 +206,48 @@ class StudioDatabase:
                 WHERE uc.user_id = ?
             """, (user_id,))
             return [dict(r) for r in cursor.fetchall()]
+
+    # ─── RESEARCH CACHE ──────────────────────────────────────────────────────────
+
+    def cache_research_candidates(self, category: str, candidates: list):
+        """Caches research candidates into SQLite to avoid redundant external calls."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for c in candidates:
+                supp_json = json.dumps(getattr(c, "supporting_sources", []))
+                meta_json = json.dumps(getattr(c, "metadata", {}))
+                cursor.execute("""
+                    INSERT OR REPLACE INTO research_cache (
+                        candidate_id, category, title, summary, source_url, source_name,
+                        trust_tier, verification_status, supporting_sources_json, metadata_json,
+                        score, published_at, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    c.id, category, c.title, c.summary, c.source_url, c.source_name,
+                    getattr(c, "trust_tier", 2),
+                    getattr(c, "verification_status", "verified"),
+                    supp_json, meta_json, getattr(c, "score", 1.0),
+                    getattr(c, "published_at", None),
+                ))
+            conn.commit()
+
+    def get_cached_candidates(self, category: str, limit: int = 4) -> List[Dict[str, Any]]:
+        """Retrieves cached candidates for a category."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM research_cache 
+                WHERE category = ? 
+                ORDER BY score DESC, created_at DESC 
+                LIMIT ?
+            """, (category, limit))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def get_cached_candidate_by_id(self, candidate_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a single candidate by ID from cache."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM research_cache WHERE candidate_id = ?", (candidate_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None

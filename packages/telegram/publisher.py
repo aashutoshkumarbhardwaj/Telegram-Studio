@@ -18,17 +18,22 @@ from packages.shared.config import BOT_TOKEN, get_target_channel_id
 logger = logging.getLogger(__name__)
 
 
+from packages.formatter.telegram_formatter import is_valid_button_url
+
+
 def build_aiogram_inline_keyboard(post: PostSchema, max_per_row: int = 2) -> Optional[InlineKeyboardMarkup]:
     """
     Constructs an aiogram InlineKeyboardMarkup instance from a PostSchema object.
+    Filters out invalid/dummy URLs.
     """
-    if not post.buttons:
+    valid_buttons = [b for b in post.buttons if is_valid_button_url(b.url)]
+    if not valid_buttons:
         return None
         
     rows = []
     current_row = []
     
-    for btn in post.buttons:
+    for btn in valid_buttons:
         current_row.append(InlineKeyboardButton(text=btn.text, url=btn.url))
         if len(current_row) >= max_per_row:
             rows.append(current_row)

@@ -1,7 +1,8 @@
 """
 Research Router for Heyaaashu Studio Bot.
-Handles /research command, live source collection, deduplication, ranking,
+Handles /research command, source collection, deduplication, ranking,
 candidate selection, AI post drafting, preview, and publication.
+Includes source trust tiers, verification indicators, and SQLite candidate caching.
 """
 
 import logging
@@ -18,7 +19,7 @@ from apps.bot.keyboards import (
     get_research_category_keyboard,
 )
 from packages.ai.extractor import extract_post_schema_from_input
-from packages.post_schema import ContentType
+from packages.post_schema import ContentType, SourceInfo, VerificationInfo, VerificationStatus
 from packages.research.dedup_rank import collect_and_rank_candidates
 from packages.shared.db import StudioDatabase
 
@@ -37,15 +38,15 @@ class ResearchFSM(StatesGroup):
 async def cmd_research(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "🔍 <b>AI Research Studio</b>\n\n"
-        "Select a domain to research, extract verified facts, and generate a post draft:",
+        "🔎 <b>AI RESEARCH STUDIO</b>\n\n"
+        "Select a domain to discover verified sources, filter noise, and draft a post:",
         parse_mode="HTML",
         reply_markup=get_research_category_keyboard(),
     )
 
 
 @router.callback_query(F.data.startswith("res_cat:"))
-async def cb_research_category_selected(callback: CallbackQuery, state: FSMContext):
+async def cb_research_category_selected(callback: CallbackQuery, state: FSMContext, db: StudioDatabase):
     cat_key = callback.data.split(":")[1]
 
     category_map = {
@@ -61,7 +62,7 @@ async def cb_research_category_selected(callback: CallbackQuery, state: FSMConte
     ctype, label = category_map.get(cat_key, (ContentType.AI_NEWS, "AI News"))
 
     await callback.message.edit_text(
-        f"🔍 <i>Collecting, deduplicating, and ranking current <b>{label}</b> sources...</i>",
+        f"🔍 <i>Collecting, deduplicating, and verifying <b>{label}</b> sources...</i>",
         parse_mode="HTML",
     )
 
@@ -78,27 +79,33 @@ async def cb_research_category_selected(callback: CallbackQuery, state: FSMConte
             await callback.answer()
             return
 
-        # Cache candidates for user
+        # Cache candidates into SQLite DB and memory
+        db.cache_research_candidates(ctype.value, candidates)
         user_id = callback.from_user.id
         _CANDIDATE_CACHE[user_id] = {c.id: c for c in candidates}
 
         number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
         body_lines = [
-            f"🔍 <b>AI Research Candidates — {label}</b>",
+            f"🔎 <b>AI RESEARCH CANDIDATES — {label.upper()}</b>",
             "━━━━━━━━━━━━━━━━━━━━",
         ]
 
         for i, c in enumerate(candidates):
             num = number_emojis[i] if i < len(number_emojis) else f"{i+1}."
             snippet = c.summary.splitlines()[0] if c.summary else c.title
-            if len(snippet) > 120:
-                snippet = snippet[:117] + "..."
-            body_lines.append(f"{num} <b>{c.title}</b>")
-            body_lines.append(f"<i>{snippet}</i>")
-            body_lines.append(f"🔗 Source: <code>{c.source_name}</code>\n")
+            if len(snippet) > 130:
+                snippet = snippet[:127] + "..."
+
+            status_badge = "✅ <b>Verified</b>" if c.verification_status == "verified" else "⚠️ <b>Needs verification</b>"
+            published_str = c.published_at or "Recent"
+
+            body_lines.append(f"{num} <b>{c.title}</b>\n")
+            body_lines.append(f"{snippet}\n")
+            body_lines.append(f"📰 <b>Source:</b> {c.source_name}")
+            body_lines.append(f"🕒 <i>{published_str}</i> • {status_badge}\n")
 
         body_lines.append("━━━━━━━━━━━━━━━━━━━━")
-        body_lines.append("👉 <i>Select a topic below to generate a publication-ready draft:</i>")
+        body_lines.append("👉 <i>Select a candidate below to generate a publication-ready draft:</i>")
 
         text_content = "\n".join(body_lines)
         await callback.message.edit_text(
@@ -112,7 +119,7 @@ async def cb_research_category_selected(callback: CallbackQuery, state: FSMConte
     except Exception as e:
         logger.error(f"Research source collection failed: {e}", exc_info=True)
         await callback.message.edit_text(
-            "⚠️ Couldn't fetch research sources. Please try again.",
+            "⚠️ Some sources were temporarily unavailable. Please try again.",
             reply_markup=get_research_category_keyboard(),
         )
 
@@ -127,23 +134,48 @@ async def cb_research_candidate_picked(callback: CallbackQuery, state: FSMContex
     user_cands = _CANDIDATE_CACHE.get(user_id, {})
     candidate = user_cands.get(cand_id)
 
+    # Fallback to SQLite cache if memory cache expired
+    if not candidate:
+        cached_row = db.get_cached_candidate_by_id(cand_id)
+        if cached_row:
+            from packages.research.collector import ResearchCandidate
+            candidate = ResearchCandidate(
+                id=cached_row["candidate_id"],
+                category=ContentType(cached_row["category"]),
+                title=cached_row["title"],
+                summary=cached_row["summary"],
+                source_url=cached_row["source_url"],
+                source_name=cached_row["source_name"],
+                trust_tier=cached_row["trust_tier"],
+                verification_status=cached_row["verification_status"],
+                published_at=cached_row["published_at"],
+            )
+
     if not candidate:
         await callback.answer("Candidate session expired. Please re-run /research.", show_alert=True)
         return
 
     await callback.message.edit_text(
-        f"⏳ <i>AI writing <b>{candidate.category.value.capitalize()}</b> post for:</i>\n"
+        f"⏳ <i>AI drafting <b>{candidate.category.value.capitalize()}</b> post for:</i>\n"
         f"<b>{candidate.title}</b>\n\n"
-        "Structuring facts and applying editorial template...",
+        "Formatting with editorial template and verified source...",
         parse_mode="HTML",
     )
 
     try:
-        # Build composite raw input
+        # Build composite raw input containing factual lines and source URL
         raw_input = f"{candidate.title}\n\n{candidate.summary}\n\n{candidate.source_url}"
 
         # Fast structured extraction into PostSchema
         post = await extract_post_schema_from_input(candidate.category, raw_input)
+
+        # Attach accurate source & verification metadata
+        post.source = SourceInfo(title=candidate.source_name, url=candidate.source_url)
+        all_sources = [candidate.source_url] + candidate.supporting_sources
+        post.verification = VerificationInfo(
+            status=VerificationStatus.VERIFIED if candidate.verification_status == "verified" else VerificationStatus.NEEDS_VERIFICATION,
+            sources=all_sources,
+        )
 
         # Save draft to DB
         draft_id = db.save_draft(user_id, post)
