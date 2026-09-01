@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  Key,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -19,6 +20,7 @@ interface TopNavProps {
   onNewDraft: () => void;
   onSave: () => void;
   onPublishClick: () => void;
+  onOpenAuth?: () => void;
   onUndo: () => void;
   onRedo: () => void;
   canUndo: boolean;
@@ -32,6 +34,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onNewDraft,
   onSave,
   onPublishClick,
+  onOpenAuth,
   onUndo,
   onRedo,
   canUndo,
@@ -128,6 +131,19 @@ export const TopNav: React.FC<TopNavProps> = ({
 
       {/* Right: Actions */}
       <div className="flex items-center gap-2">
+        {onOpenAuth && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenAuth}
+            className="h-8 text-xs font-medium text-slate-400 hover:text-slate-200 border border-slate-700/60 hover:bg-slate-800/60"
+            title="Studio Authentication Settings"
+          >
+            <Key className="w-3.5 h-3.5 mr-1 text-cyan-400" />
+            <span className="hidden sm:inline">Auth</span>
+          </Button>
+        )}
+
         <Button
           variant="outline"
           size="sm"

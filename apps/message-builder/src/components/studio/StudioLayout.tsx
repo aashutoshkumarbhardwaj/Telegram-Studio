@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { DraftListItem, PostSchema } from '@/types/postSchema';
 import { TemplateStyle } from '@/lib/templates';
-import { fetchDrafts, fetchDraftById, saveDraftPost, deleteDraftById, publishDraftToTelegram } from '@/lib/api';
+import { fetchDrafts, fetchDraftById, saveDraftPost, deleteDraftById, publishDraftToTelegram, onAuthRequired, checkAuthStatus } from '@/lib/api';
 import { TopNav } from './TopNav';
 import { ContentEditor } from './ContentEditor';
 import { TelegramPreview } from './TelegramPreview';
 import { SettingsPanel } from './SettingsPanel';
 import { DraftsDrawer } from './DraftsDrawer';
 import { PublishModal } from './PublishModal';
+import { StudioAuthModal } from './StudioAuthModal';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
@@ -47,6 +48,7 @@ export const StudioLayout: React.FC = () => {
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
   const [isDraftsOpen, setIsDraftsOpen] = useState(false);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [activeMobileTab, setActiveMobileTab] = useState<'edit' | 'preview' | 'settings'>('edit');
@@ -56,9 +58,21 @@ export const StudioLayout: React.FC = () => {
   const historyIndexRef = useRef<number>(0);
   const isUndoRedoActionRef = useRef<boolean>(false);
 
-  // Load drafts on mount
+  // Load drafts and verify auth on mount
   useEffect(() => {
     loadDraftsList();
+
+    const unsubscribe = onAuthRequired((required) => {
+      setIsAuthModalOpen(required);
+    });
+
+    checkAuthStatus().then((status) => {
+      if (status.authRequired && !status.authenticated) {
+        setIsAuthModalOpen(true);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const loadDraftsList = async () => {
@@ -229,6 +243,7 @@ export const StudioLayout: React.FC = () => {
         onNewDraft={handleNewDraft}
         onSave={handleSave}
         onPublishClick={() => setIsPublishModalOpen(true)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
         onUndo={handleUndo}
         onRedo={handleRedo}
         canUndo={canUndo}
@@ -324,6 +339,14 @@ export const StudioLayout: React.FC = () => {
         onConfirmPublish={handleConfirmPublish}
         post={post}
         isPublishing={isPublishing}
+      />
+
+      <StudioAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthenticated={() => {
+          loadDraftsList();
+        }}
       />
     </div>
   );

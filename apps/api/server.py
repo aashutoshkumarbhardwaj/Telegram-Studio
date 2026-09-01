@@ -130,18 +130,46 @@ async def login_endpoint(request: web.Request) -> web.Response:
     try:
         body = await request.json()
         token = body.get("token") or body.get("password") or ""
+        token = str(token).strip()
         if not STUDIO_AUTH_TOKEN or token == STUDIO_AUTH_TOKEN:
             return web.json_response({
                 "success": True,
                 "message": "Authenticated successfully",
-                "token": STUDIO_AUTH_TOKEN or "local_dev_token",
+                "token": token or STUDIO_AUTH_TOKEN or "local_dev_token",
             }, headers=cors)
-        return web.json_response({"success": False, "error": "Invalid authentication token"}, status=401, headers=cors)
+        return web.json_response({"success": False, "error": "Invalid studio access token"}, status=401, headers=cors)
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=400, headers=cors)
 
 
+async def verify_auth_endpoint(request: web.Request) -> web.Response:
+    """GET /api/auth/verify — Verifies whether studio authentication is valid."""
+    cors = _get_cors_headers(request)
+    if not STUDIO_AUTH_TOKEN:
+        return web.json_response({
+            "authenticated": True,
+            "auth_required": False,
+            "message": "Authentication not required in this environment",
+        }, headers=cors)
+
+    is_valid = verify_request_auth(request)
+    if is_valid:
+        return web.json_response({
+            "authenticated": True,
+            "auth_required": True,
+            "message": "Token is valid",
+        }, headers=cors)
+
+    return web.json_response({
+        "authenticated": False,
+        "auth_required": True,
+        "error": "Authentication required",
+    }, status=401, headers=cors)
+
+
+
 # ─── TELEGRAM WEBHOOK HANDLERS ──────────────────────────────────────────────────
+
 
 async def telegram_webhook_endpoint(request: web.Request) -> web.Response:
     """POST /api/telegram/webhook — Routes incoming Telegram updates into aiogram dispatcher."""
@@ -444,6 +472,8 @@ def create_app(
     app.router.add_options("/{tail:.*}", handle_options)
     app.router.add_get("/api/health", health_check)
     app.router.add_post("/api/auth/login", login_endpoint)
+    app.router.add_get("/api/auth/verify", verify_auth_endpoint)
+    app.router.add_post("/api/auth/verify", verify_auth_endpoint)
     app.router.add_post("/api/telegram/webhook", telegram_webhook_endpoint)
     app.router.add_post("/api/telegram/set-webhook", set_telegram_webhook_endpoint)
     app.router.add_get("/api/drafts", get_drafts)

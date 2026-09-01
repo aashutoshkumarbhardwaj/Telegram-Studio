@@ -1,8 +1,7 @@
 /**
  * Heyaaashu Studio API Client.
  * Connects Visual Editor to backend PostSchema API with authentication & local storage fallback.
- * Always resolves to relative same-origin `/api` by default in both development (via Vite proxy)
- * and production (via reverse proxy / aiohttp).
+ * Handles same-origin `/api` routing, token management, and global 401 unauthorized interception.
  */
 
 import { DraftListItem, PostSchema } from '@/types/postSchema';
@@ -20,6 +19,24 @@ export const API_BASE_URL = getApiBaseUrl();
 const LOCAL_STORAGE_KEY = 'heyaaashu_studio_drafts_v1';
 const AUTH_TOKEN_KEY = 'heyaaashu_studio_auth_token';
 
+type AuthStateListener = (required: boolean) => void;
+const authListeners = new Set<AuthStateListener>();
+
+export function onAuthRequired(listener: AuthStateListener): () => void {
+  authListeners.add(listener);
+  return () => authListeners.delete(listener);
+}
+
+export function notifyAuthRequired(required: boolean = true): void {
+  authListeners.forEach((listener) => {
+    try {
+      listener(required);
+    } catch (e) {
+      console.error('Auth listener error:', e);
+    }
+  });
+}
+
 export function getStudioAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -27,7 +44,8 @@ export function getStudioAuthToken(): string | null {
 
 export function setStudioAuthToken(token: string): void {
   if (typeof window !== 'undefined') {
-    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    localStorage.setItem(AUTH_TOKEN_KEY, token.trim());
+    notifyAuthRequired(false);
   }
 }
 
@@ -37,7 +55,7 @@ export function clearStudioAuthToken(): void {
   }
 }
 
-function getRequestHeaders(): Record<string, string> {
+export function getRequestHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -50,21 +68,53 @@ function getRequestHeaders(): Record<string, string> {
   return headers;
 }
 
+export async function checkAuthStatus(): Promise<{ authenticated: boolean; authRequired: boolean }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/verify`, {
+      headers: getRequestHeaders(),
+    });
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { authenticated: false, authRequired: true };
+    }
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        authenticated: Boolean(data.authenticated),
+        authRequired: Boolean(data.auth_required),
+      };
+    }
+  } catch (e) {
+    console.warn('Could not check auth status:', e);
+  }
+  return { authenticated: true, authRequired: false };
+}
+
 export async function loginStudio(token: string): Promise<{ success: boolean; error?: string }> {
+  const cleanToken = token.trim();
+  if (!cleanToken) {
+    return { success: false, error: 'Please enter a studio access token.' };
+  }
+
   try {
     const res = await fetch(`${API_BASE_URL}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ token }),
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ token: cleanToken }),
     });
-    const data = await res.json();
+
+    const data = await res.json().catch(() => ({}));
     if (res.ok && data.success) {
-      setStudioAuthToken(data.token || token);
+      setStudioAuthToken(data.token || cleanToken);
       return { success: true };
     }
-    return { success: false, error: data.error || 'Authentication failed' };
+    return { success: false, error: data.error || 'Invalid studio access token.' };
   } catch (e: any) {
-    return { success: false, error: e.message || 'Authentication request failed' };
+    return { success: false, error: e.message || 'Authentication request failed.' };
   }
 }
 
@@ -73,6 +123,13 @@ export async function fetchDrafts(): Promise<DraftListItem[]> {
     const res = await fetch(`${API_BASE_URL}/drafts`, {
       headers: getRequestHeaders(),
     });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return getLocalDraftsFallback();
+    }
+
     if (res.ok) {
       const data = await res.json();
       if (data.success && Array.isArray(data.drafts)) {
@@ -83,7 +140,10 @@ export async function fetchDrafts(): Promise<DraftListItem[]> {
     console.warn('Backend API unavailable, using local drafts cache:', e);
   }
 
-  // Fallback to localStorage
+  return getLocalDraftsFallback();
+}
+
+function getLocalDraftsFallback(): DraftListItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) {
@@ -102,6 +162,12 @@ export async function fetchDraftById(
     const res = await fetch(`${API_BASE_URL}/drafts/${id}`, {
       headers: getRequestHeaders(),
     });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+    }
+
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.schema) {
@@ -113,7 +179,7 @@ export async function fetchDraftById(
   }
 
   // Fallback
-  const drafts = await fetchDrafts();
+  const drafts = getLocalDraftsFallback();
   const found = drafts.find((d) => d.post_id === id);
   if (found && found.raw_schema_json) {
     return {
@@ -138,6 +204,16 @@ export async function saveDraftPost(
       body: JSON.stringify({ schema: post }),
     });
 
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return {
+        success: false,
+        draftId: draftId || 0,
+        error: 'Authentication required: Please enter your Studio Access Token.',
+      };
+    }
+
     if (res.ok) {
       const data = await res.json();
       if (data.success) {
@@ -157,7 +233,7 @@ export async function saveDraftPost(
 
   // Fallback to local storage
   const id = draftId || Date.now();
-  const drafts = await fetchDrafts();
+  const drafts = getLocalDraftsFallback();
   const existingIdx = drafts.findIndex((d) => d.post_id === id);
 
   const draftItem: DraftListItem = {
@@ -186,13 +262,20 @@ export async function deleteDraftById(id: number): Promise<boolean> {
       method: 'DELETE',
       headers: getRequestHeaders(),
     });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return false;
+    }
+
     if (res.ok) return true;
   } catch (e) {
     // ignore
   }
 
   // Local storage cleanup
-  const drafts = await fetchDrafts();
+  const drafts = getLocalDraftsFallback();
   const filtered = drafts.filter((d) => d.post_id !== id);
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
   return true;
@@ -208,6 +291,15 @@ export async function publishDraftToTelegram(
       headers: getRequestHeaders(),
       body: JSON.stringify({ schema: post, draft_id: draftId }),
     });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return {
+        success: false,
+        error: 'Authentication required: Please enter your Studio Access Token to publish.',
+      };
+    }
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
