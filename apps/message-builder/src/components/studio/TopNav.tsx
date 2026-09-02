@@ -13,12 +13,15 @@ import {
   Clock,
   Sparkles,
   Key,
+  CalendarClock,
 } from 'lucide-react';
 
 interface TopNavProps {
   onOpenDrafts: () => void;
   onNewDraft: () => void;
   onOpenAIGenerator?: () => void;
+  onOpenScheduled?: () => void;
+  scheduledCount?: number;
   onSave: () => void;
   onPublishClick: () => void;
   onOpenAuth?: () => void;
@@ -34,6 +37,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenDrafts,
   onNewDraft,
   onOpenAIGenerator,
+  onOpenScheduled,
+  scheduledCount = 0,
   onSave,
   onPublishClick,
   onOpenAuth,
@@ -89,6 +94,24 @@ export const TopNav: React.FC<TopNavProps> = ({
             <FolderOpen className="w-3.5 h-3.5 mr-1" />
             Drafts
           </Button>
+
+          {onOpenScheduled && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onOpenScheduled}
+              className="text-xs font-medium text-muted-foreground hover:text-foreground h-8 px-2 flex items-center gap-1"
+              title="View Scheduled Queue"
+            >
+              <CalendarClock className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Scheduled</span>
+              {scheduledCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-800">
+                  {scheduledCount}
+                </span>
+              )}
+            </Button>
+          )}
 
           <Button
             variant="ghost"
@@ -182,6 +205,22 @@ export const TopNav: React.FC<TopNavProps> = ({
         >
           <FolderOpen className="w-4 h-4" />
         </Button>
+
+        {/* Mobile Scheduled queue quick button */}
+        {onOpenScheduled && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenScheduled}
+            className="sm:hidden h-8 w-8 p-0 text-muted-foreground hover:text-foreground relative"
+            title="Open Scheduled Queue"
+          >
+            <CalendarClock className="w-4 h-4 text-cyan-400" />
+            {scheduledCount > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-cyan-400 ring-2 ring-slate-950" />
+            )}
+          </Button>
+        )}
 
         {/* Auth button */}
         {onOpenAuth && (

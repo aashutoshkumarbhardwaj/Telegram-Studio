@@ -6,6 +6,7 @@
 
 import { DraftListItem, PostSchema } from '@/types/postSchema';
 import { GenerateRequest, GenerateResponse, HookResponse } from '@/types/generator';
+import { ScheduledPost, ScheduleRequest } from '@/types/scheduler';
 
 export function getApiBaseUrl(): string {
   const envUrl = import.meta.env.VITE_API_URL;
@@ -387,4 +388,188 @@ export async function generateHookOptions(
     return { success: false, error: e.message || 'Hook generation request failed' };
   }
 }
+
+// ─── SCHEDULING API CLIENT ──────────────────────────────────────────────────
+
+export async function schedulePost(
+  req: ScheduleRequest
+): Promise<{ success: boolean; scheduled_post?: ScheduledPost; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/schedule`, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify(req),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return data;
+    }
+    return { success: false, error: data.error || `Failed to schedule post (HTTP ${res.status})` };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Network error while scheduling post' };
+  }
+}
+
+export async function fetchScheduledPosts(
+  statusFilter?: string
+): Promise<{ success: boolean; scheduled_posts: ScheduledPost[]; error?: string }> {
+  try {
+    const url = statusFilter
+      ? `${API_BASE_URL}/scheduled?status=${encodeURIComponent(statusFilter)}`
+      : `${API_BASE_URL}/scheduled`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: getRequestHeaders(),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, scheduled_posts: [], error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return { success: true, scheduled_posts: data.scheduled_posts || [] };
+    }
+    return { success: false, scheduled_posts: [], error: data.error || 'Failed to fetch scheduled posts' };
+  } catch (e: any) {
+    return { success: false, scheduled_posts: [], error: e.message || 'Network error' };
+  }
+}
+
+export async function fetchScheduledPostById(
+  id: number
+): Promise<{ success: boolean; scheduled_post?: ScheduledPost; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/scheduled/${id}`, {
+      method: 'GET',
+      headers: getRequestHeaders(),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return data;
+    }
+    return { success: false, error: data.error || 'Scheduled post not found' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Network error' };
+  }
+}
+
+export async function reschedulePost(
+  id: number,
+  scheduledAt: string
+): Promise<{ success: boolean; scheduled_post?: ScheduledPost; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/scheduled/${id}`, {
+      method: 'PUT',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({ scheduled_at: scheduledAt }),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return data;
+    }
+    return { success: false, error: data.error || 'Failed to reschedule post' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Network error' };
+  }
+}
+
+export async function deleteScheduledPost(
+  id: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/scheduled/${id}`, {
+      method: 'DELETE',
+      headers: getRequestHeaders(),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'Failed to delete schedule' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Network error' };
+  }
+}
+
+export async function publishScheduledNow(
+  id: number
+): Promise<{ success: boolean; message_id?: number; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/scheduled/${id}/publish`, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return data;
+    }
+    return { success: false, error: data.error || 'Failed to publish now' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Network error' };
+  }
+}
+
+export async function cancelScheduledPost(
+  id: number
+): Promise<{ success: boolean; status?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/scheduled/${id}/cancel`, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return data;
+    }
+    return { success: false, error: data.error || 'Failed to cancel schedule' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Network error' };
+  }
+}
+
 

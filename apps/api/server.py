@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from aiohttp import web
@@ -28,6 +29,7 @@ from apps.bot.handlers.start import router as start_router
 from packages.ai import UrlFetchError, generate_hook_options, generate_post_from_input
 from packages.formatter import format_post_text, generate_telegram_payload, validate_telegram_constraints
 from packages.post_schema import ContentType, PostSchema
+from packages.scheduler import PublisherScheduler
 from packages.shared.config import (
     ALLOWED_ORIGINS,
     BOT_TOKEN,
@@ -476,6 +478,245 @@ async def generate_hook_endpoint(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=400, headers=cors)
 
 
+# ─── SCHEDULING ENDPOINTS ───────────────────────────────────────────────────────
+
+def parse_and_validate_future_datetime(scheduled_at_raw: Any) -> datetime:
+    """
+    Parses an ISO format datetime string and verifies that it is strictly in the future.
+    Raises ValueError if invalid format or if timestamp is in the past.
+    """
+    if not scheduled_at_raw:
+        raise ValueError("scheduled_at field is required.")
+    try:
+        dt = datetime.fromisoformat(str(scheduled_at_raw).replace("Z", "+00:00"))
+    except Exception as e:
+        raise ValueError(f"Invalid ISO datetime format: {e}")
+
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    if dt <= now:
+        raise ValueError("Scheduled time must be in the future.")
+    return dt
+
+
+async def schedule_post_endpoint(request: web.Request) -> web.Response:
+    """POST /api/schedule — Validates PostSchema and schedules post for future publication."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    try:
+        body = await request.json()
+        raw_schema = body.get("schema") or body.get("post") or body
+        post = PostSchema.model_validate(raw_schema)
+        post_id = body.get("post_id")
+        user_id = body.get("user_id", 1)
+        channel_id = body.get("channel_id") or get_target_channel_id()
+
+        # 1. Require human-approved content
+        if not post.title or not post.title.strip():
+            return web.json_response({"success": False, "error": "Post headline cannot be empty."}, status=400, headers=cors)
+        if not post.body or not post.body.strip():
+            return web.json_response({"success": False, "error": "Post body cannot be empty."}, status=400, headers=cors)
+
+        # 2. Require future datetime
+        scheduled_at_raw = body.get("scheduled_at")
+        try:
+            future_dt = parse_and_validate_future_datetime(scheduled_at_raw)
+        except ValueError as val_err:
+            return web.json_response({"success": False, "error": str(val_err)}, status=400, headers=cors)
+
+        # 3. Create schedule in database (handles duplicate prevention)
+        try:
+            scheduled_id = db.create_scheduled_post(
+                post=post,
+                scheduled_at=future_dt.isoformat(),
+                post_id=int(post_id) if post_id is not None else None,
+                user_id=user_id,
+                channel_id=int(channel_id) if str(channel_id).startswith("-100") else 0,
+            )
+        except ValueError as dup_err:
+            return web.json_response({"success": False, "error": str(dup_err)}, status=409, headers=cors)
+
+        scheduled_record = db.get_scheduled_post_by_id(scheduled_id)
+
+        return web.json_response({
+            "success": True,
+            "scheduled_post": scheduled_record,
+        }, status=200, headers=cors)
+    except ValidationError as e:
+        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+    except Exception as e:
+        logger.error(f"Scheduling failed: {e}", exc_info=True)
+        return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
+
+
+async def get_scheduled_posts_endpoint(request: web.Request) -> web.Response:
+    """GET /api/scheduled — Retrieves scheduled posts."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    status_filter = request.query.get("status")
+    posts = db.get_scheduled_posts(status_filter=status_filter)
+    return web.json_response({
+        "success": True,
+        "scheduled_posts": posts,
+        "count": len(posts),
+    }, headers=cors)
+
+
+async def get_scheduled_post_by_id_endpoint(request: web.Request) -> web.Response:
+    """GET /api/scheduled/{id} — Retrieves a single scheduled post."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    try:
+        post_id = int(request.match_info["id"])
+    except ValueError:
+        return web.json_response({"success": False, "error": "Invalid ID format"}, status=400, headers=cors)
+
+    post = db.get_scheduled_post_by_id(post_id)
+    if not post:
+        return web.json_response({"success": False, "error": "Scheduled post not found"}, status=404, headers=cors)
+
+    return web.json_response({"success": True, "scheduled_post": post}, headers=cors)
+
+
+async def update_scheduled_post_endpoint(request: web.Request) -> web.Response:
+    """PUT /api/scheduled/{id} — Reschedules or updates a scheduled post."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    try:
+        post_id = int(request.match_info["id"])
+    except ValueError:
+        return web.json_response({"success": False, "error": "Invalid ID format"}, status=400, headers=cors)
+
+    existing = db.get_scheduled_post_by_id(post_id)
+    if not existing:
+        return web.json_response({"success": False, "error": "Scheduled post not found"}, status=404, headers=cors)
+
+    try:
+        body = await request.json()
+        new_post = None
+        if "schema" in body or "post" in body:
+            raw_schema = body.get("schema") or body.get("post")
+            new_post = PostSchema.model_validate(raw_schema)
+
+        scheduled_at_iso = None
+        if "scheduled_at" in body:
+            future_dt = parse_and_validate_future_datetime(body["scheduled_at"])
+            scheduled_at_iso = future_dt.isoformat()
+
+        status = body.get("status")
+
+        updated = db.update_scheduled_post(
+            post_id=post_id,
+            scheduled_at=scheduled_at_iso,
+            post=new_post,
+            status=status,
+        )
+
+        if not updated:
+            return web.json_response({"success": False, "error": "Failed to update scheduled post"}, status=500, headers=cors)
+
+        item = db.get_scheduled_post_by_id(post_id)
+        return web.json_response({"success": True, "scheduled_post": item}, headers=cors)
+    except ValueError as val_err:
+        return web.json_response({"success": False, "error": str(val_err)}, status=400, headers=cors)
+    except ValidationError as e:
+        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
+
+
+async def delete_scheduled_post_endpoint(request: web.Request) -> web.Response:
+    """DELETE /api/scheduled/{id} — Removes a scheduled post."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    try:
+        post_id = int(request.match_info["id"])
+    except ValueError:
+        return web.json_response({"success": False, "error": "Invalid ID format"}, status=400, headers=cors)
+
+    existing = db.get_scheduled_post_by_id(post_id)
+    if not existing:
+        return web.json_response({"success": False, "error": "Scheduled post not found"}, status=404, headers=cors)
+
+    if existing.get("status") == "publishing":
+        return web.json_response({"success": False, "error": "Cannot delete a post currently being published."}, status=400, headers=cors)
+
+    db.delete_scheduled_post(post_id)
+    return web.json_response({"success": True, "deleted_id": post_id}, headers=cors)
+
+
+async def publish_scheduled_now_endpoint(request: web.Request) -> web.Response:
+    """POST /api/scheduled/{id}/publish — Immediately publishes a scheduled post."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    try:
+        post_id = int(request.match_info["id"])
+    except ValueError:
+        return web.json_response({"success": False, "error": "Invalid ID format"}, status=400, headers=cors)
+
+    item = db.get_scheduled_post_by_id(post_id)
+    if not item:
+        return web.json_response({"success": False, "error": "Scheduled post not found"}, status=404, headers=cors)
+
+    if item.get("status") == "posted":
+        return web.json_response({"success": False, "error": "Post has already been published."}, status=400, headers=cors)
+
+    # Acquire post
+    db.update_scheduled_post(post_id=post_id, status="publishing")
+
+    channel_id = item.get("channel_id") or get_target_channel_id()
+    schema_dict = item.get("schema")
+    post = PostSchema.model_validate(schema_dict) if schema_dict else db.get_post_schema(post_id)
+
+    if not post:
+        db.mark_scheduled_failed(post_id, "Post schema is missing or invalid.")
+        return web.json_response({"success": False, "error": "Post schema is missing"}, status=500, headers=cors)
+
+    res = await publish_post_to_telegram(post, channel_id=channel_id)
+    if res.get("success"):
+        msg_id = res.get("message_id", 0)
+        target_chat = int(channel_id) if str(channel_id).startswith("-100") else 0
+        db.mark_scheduled_posted(post_id, target_chat, msg_id)
+        return web.json_response({
+            "success": True,
+            "post_id": post_id,
+            "message_id": msg_id,
+            "channel_id": channel_id,
+            "status": "posted",
+        }, headers=cors)
+    else:
+        err = res.get("error") or "Publishing rejected by Telegram"
+        db.mark_scheduled_failed(post_id, err)
+        return web.json_response({
+            "success": False,
+            "post_id": post_id,
+            "error": err,
+            "status": "failed",
+        }, status=500, headers=cors)
+
+
+async def cancel_scheduled_endpoint(request: web.Request) -> web.Response:
+    """POST /api/scheduled/{id}/cancel — Cancels a scheduled post."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    try:
+        post_id = int(request.match_info["id"])
+    except ValueError:
+        return web.json_response({"success": False, "error": "Invalid ID format"}, status=400, headers=cors)
+
+    item = db.get_scheduled_post_by_id(post_id)
+    if not item:
+        return web.json_response({"success": False, "error": "Scheduled post not found"}, status=404, headers=cors)
+
+    if item.get("status") == "posted":
+        return web.json_response({"success": False, "error": "Cannot cancel an already published post."}, status=400, headers=cors)
+
+    db.cancel_scheduled_post(post_id)
+    return web.json_response({"success": True, "post_id": post_id, "status": "cancelled"}, headers=cors)
+
+
 # ─── SPA STATIC ASSETS FALLBACK ─────────────────────────────────────────────────
 
 async def serve_spa_index(request: web.Request) -> web.Response:
@@ -496,6 +737,7 @@ def create_app(
     db: Optional[StudioDatabase] = None,
     bot: Optional[Bot] = None,
     dp: Optional[Dispatcher] = None,
+    enable_scheduler: bool = True,
 ) -> web.Application:
     """Creates the aiohttp web application with webhook routing and SPA serving."""
     app = web.Application(middlewares=[auth_middleware])
@@ -556,6 +798,26 @@ def create_app(
     app.router.add_post("/api/publish", publish_post_endpoint)
     app.router.add_post("/api/generate", generate_post_endpoint)
     app.router.add_post("/api/generate/hook", generate_hook_endpoint)
+
+    # Scheduling routes
+    app.router.add_post("/api/schedule", schedule_post_endpoint)
+    app.router.add_get("/api/scheduled", get_scheduled_posts_endpoint)
+    app.router.add_get("/api/scheduled/{id}", get_scheduled_post_by_id_endpoint)
+    app.router.add_put("/api/scheduled/{id}", update_scheduled_post_endpoint)
+    app.router.add_delete("/api/scheduled/{id}", delete_scheduled_post_endpoint)
+    app.router.add_post("/api/scheduled/{id}/publish", publish_scheduled_now_endpoint)
+    app.router.add_post("/api/scheduled/{id}/cancel", cancel_scheduled_endpoint)
+
+    # In-process background scheduler
+    if enable_scheduler:
+        async def scheduler_ctx(app_inst):
+            sched = PublisherScheduler(db=database, poll_interval=15.0)
+            app_inst["scheduler"] = sched
+            await sched.start()
+            yield
+            await sched.stop()
+
+        app.cleanup_ctx.append(scheduler_ctx)
 
     # Static assets routes if compiled dist exists
     dist_dir = Path(__file__).resolve().parent.parent / "message-builder" / "dist"

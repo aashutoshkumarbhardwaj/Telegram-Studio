@@ -38,12 +38,16 @@ class StudioDatabase:
         )
 
         if self.is_postgres:
-            # Normalize Render postgres:// to postgresql:// if needed for psycopg
             if self.database_url.startswith("postgres://"):
                 self.database_url = "postgresql://" + self.database_url[len("postgres://"):]
             logger.info("StudioDatabase initialized with PostgreSQL backend.")
         else:
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                fallback_path = Path(__file__).resolve().parent.parent.parent / "data" / "studio.db"
+                fallback_path.parent.mkdir(parents=True, exist_ok=True)
+                self.db_path = str(fallback_path)
             logger.info(f"StudioDatabase initialized with SQLite backend at {self.db_path}")
 
         self.init_db()
@@ -114,9 +118,22 @@ class StudioDatabase:
                         raw_schema_json TEXT,
                         scheduled_at TIMESTAMPTZ,
                         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                        published_at TIMESTAMPTZ
+                        published_at TIMESTAMPTZ,
+                        telegram_message_id BIGINT,
+                        error_message TEXT,
+                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
+                for col_name, col_type in [
+                    ("telegram_message_id", "BIGINT"),
+                    ("error_message", "TEXT"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
+                    ("scheduled_at", "TIMESTAMPTZ"),
+                ]:
+                    try:
+                        cursor.execute(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+                    except Exception:
+                        pass
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS sent_posts (
                         channel_id BIGINT,
@@ -202,7 +219,10 @@ class StudioDatabase:
                         raw_schema_json TEXT,
                         scheduled_at TIMESTAMP,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        published_at TIMESTAMP
+                        published_at TIMESTAMP,
+                        telegram_message_id INTEGER,
+                        error_message TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
                 cursor.execute("""
@@ -258,7 +278,11 @@ class StudioDatabase:
                     ("parse_mode", "TEXT DEFAULT 'HTML'"),
                     ("raw_schema_json", "TEXT"),
                     ("status", "TEXT DEFAULT 'draft'"),
+                    ("scheduled_at", "TIMESTAMP"),
                     ("published_at", "TIMESTAMP"),
+                    ("telegram_message_id", "INTEGER"),
+                    ("error_message", "TEXT"),
+                    ("updated_at", "TIMESTAMP"),
                 ]
                 for col_name, col_type in migrations:
                     try:
@@ -467,3 +491,312 @@ class StudioDatabase:
                     """, params)
             if not self.is_postgres:
                 conn.commit()
+
+    # ─── SCHEDULING PERSISTENCE & LIFECYCLE ──────────────────────────────────────
+
+    def create_scheduled_post(
+        self,
+        post: PostSchema,
+        scheduled_at: str,
+        post_id: Optional[int] = None,
+        user_id: int = 1,
+        channel_id: Optional[int] = None,
+    ) -> int:
+        """
+        Creates a new scheduled post or transitions an existing draft to 'scheduled'.
+        Prevents scheduling if the post is already scheduled, publishing, or posted.
+        """
+        schema_json = post.model_dump_json()
+        media_json = json.dumps([m.model_dump() for m in post.media])
+        buttons_json = json.dumps([b.model_dump() for b in post.buttons])
+        source_json = json.dumps(post.source.model_dump() if hasattr(post.source, "model_dump") else post.source)
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if post_id is not None:
+                query = "SELECT status FROM posts WHERE post_id = " + ("%s" if self.is_postgres else "?")
+                cursor.execute(query, (post_id,))
+                row = cursor.fetchone()
+                if row:
+                    current_status = row["status"] if isinstance(row, dict) else row[0]
+                    if current_status in ("scheduled", "publishing", "posted"):
+                        raise ValueError(f"Post #{post_id} is already in '{current_status}' status. Duplicate scheduling is not allowed.")
+
+                update_sql = """
+                    UPDATE posts
+                    SET content_type = %s, title = %s, text = %s, media_json = %s, buttons_json = %s,
+                        source_json = %s, parse_mode = %s, raw_schema_json = %s, scheduled_at = %s,
+                        status = 'scheduled', updated_at = CURRENT_TIMESTAMP
+                    WHERE post_id = %s
+                """ if self.is_postgres else """
+                    UPDATE posts
+                    SET content_type = ?, title = ?, text = ?, media_json = ?, buttons_json = ?,
+                        source_json = ?, parse_mode = ?, raw_schema_json = ?, scheduled_at = ?,
+                        status = 'scheduled', updated_at = CURRENT_TIMESTAMP
+                    WHERE post_id = ?
+                """
+                params = (
+                    post.content_type.value, post.title, post.body, media_json, buttons_json,
+                    source_json, post.parse_mode.value, schema_json, scheduled_at, post_id
+                )
+                cursor.execute(update_sql, params)
+                if not self.is_postgres:
+                    conn.commit()
+                return post_id
+            else:
+                if self.is_postgres:
+                    cursor.execute("""
+                        INSERT INTO posts (
+                            user_id, channel_id, content_type, title, text, media_json, buttons_json,
+                            source_json, parse_mode, status, raw_schema_json, scheduled_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', %s, %s, CURRENT_TIMESTAMP)
+                        RETURNING post_id;
+                    """, (
+                        user_id, channel_id, post.content_type.value, post.title, post.body,
+                        media_json, buttons_json, source_json, post.parse_mode.value,
+                        schema_json, scheduled_at
+                    ))
+                    res = cursor.fetchone()
+                    return res["post_id"] if isinstance(res, dict) else res[0]
+                else:
+                    cursor.execute("""
+                        INSERT INTO posts (
+                            user_id, channel_id, content_type, title, text, media_json, buttons_json,
+                            source_json, parse_mode, status, raw_schema_json, scheduled_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, CURRENT_TIMESTAMP)
+                    """, (
+                        user_id, channel_id, post.content_type.value, post.title, post.body,
+                        media_json, buttons_json, source_json, post.parse_mode.value,
+                        schema_json, scheduled_at
+                    ))
+                    conn.commit()
+                    return cursor.lastrowid
+
+    def get_scheduled_posts(self, status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieves all scheduled, publishing, posted, failed, or cancelled posts."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if status_filter:
+                query = "SELECT * FROM posts WHERE status = " + ("%s" if self.is_postgres else "?") + " ORDER BY scheduled_at ASC, created_at DESC"
+                cursor.execute(query, (status_filter,))
+            else:
+                query = "SELECT * FROM posts WHERE status != 'draft' OR scheduled_at IS NOT NULL ORDER BY scheduled_at ASC, created_at DESC"
+                cursor.execute(query)
+
+            rows = cursor.fetchall()
+            results = []
+            for r in rows:
+                item = dict(r)
+                if item.get("raw_schema_json"):
+                    try:
+                        item["schema"] = json.loads(item["raw_schema_json"])
+                    except Exception:
+                        item["schema"] = None
+                else:
+                    item["schema"] = None
+                for k in ("created_at", "updated_at", "scheduled_at", "published_at"):
+                    if item.get(k) is not None:
+                        item[k] = str(item[k])
+                results.append(item)
+            return results
+
+    def get_scheduled_post_by_id(self, post_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieves a single scheduled post by ID."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT * FROM posts WHERE post_id = " + ("%s" if self.is_postgres else "?")
+            cursor.execute(query, (post_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            if item.get("raw_schema_json"):
+                try:
+                    item["schema"] = json.loads(item["raw_schema_json"])
+                except Exception:
+                    item["schema"] = None
+            else:
+                item["schema"] = None
+            for k in ("created_at", "updated_at", "scheduled_at", "published_at"):
+                if item.get(k) is not None:
+                    item[k] = str(item[k])
+            return item
+
+    def update_scheduled_post(
+        self,
+        post_id: int,
+        scheduled_at: Optional[str] = None,
+        post: Optional[PostSchema] = None,
+        status: Optional[str] = None,
+    ) -> bool:
+        """Updates schedule date, content, or status."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            updates = ["updated_at = CURRENT_TIMESTAMP"]
+            params = []
+
+            if scheduled_at is not None:
+                updates.append("scheduled_at = " + ("%s" if self.is_postgres else "?"))
+                params.append(scheduled_at)
+            if status is not None:
+                updates.append("status = " + ("%s" if self.is_postgres else "?"))
+                params.append(status)
+            if post is not None:
+                schema_json = post.model_dump_json()
+                media_json = json.dumps([m.model_dump() for m in post.media])
+                buttons_json = json.dumps([b.model_dump() for b in post.buttons])
+                source_json = json.dumps(post.source.model_dump() if hasattr(post.source, "model_dump") else post.source)
+                for col, val in [
+                    ("content_type", post.content_type.value),
+                    ("title", post.title),
+                    ("text", post.body),
+                    ("media_json", media_json),
+                    ("buttons_json", buttons_json),
+                    ("source_json", source_json),
+                    ("parse_mode", post.parse_mode.value),
+                    ("raw_schema_json", schema_json),
+                ]:
+                    updates.append(f"{col} = " + ("%s" if self.is_postgres else "?"))
+                    params.append(val)
+
+            params.append(post_id)
+            sql = f"UPDATE posts SET {', '.join(updates)} WHERE post_id = " + ("%s" if self.is_postgres else "?")
+            cursor.execute(sql, tuple(params))
+            if not self.is_postgres:
+                conn.commit()
+            return cursor.rowcount > 0
+
+    def cancel_scheduled_post(self, post_id: int) -> bool:
+        """Transitions post to cancelled status."""
+        return self.update_scheduled_post(post_id=post_id, status="cancelled")
+
+    def delete_scheduled_post(self, post_id: int) -> bool:
+        """Deletes scheduled post."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = "DELETE FROM posts WHERE post_id = " + ("%s" if self.is_postgres else "?")
+            cursor.execute(query, (post_id,))
+            if not self.is_postgres:
+                conn.commit()
+            return cursor.rowcount > 0
+
+    def acquire_due_scheduled_posts(self, now_iso: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Atomically finds and locks due scheduled posts by transitioning their status to 'publishing'.
+        Avoids race conditions and guarantees zero duplicate publishing.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            acquired = []
+
+            if self.is_postgres:
+                cursor.execute("""
+                    WITH due_candidates AS (
+                        SELECT post_id FROM posts
+                        WHERE status = 'scheduled' AND scheduled_at <= %s
+                        ORDER BY scheduled_at ASC
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT %s
+                    )
+                    UPDATE posts p
+                    SET status = 'publishing', updated_at = CURRENT_TIMESTAMP
+                    FROM due_candidates c
+                    WHERE p.post_id = c.post_id
+                    RETURNING p.*;
+                """, (now_iso, limit))
+                rows = cursor.fetchall()
+                for r in rows:
+                    item = dict(r)
+                    if item.get("raw_schema_json"):
+                        try:
+                            item["schema"] = json.loads(item["raw_schema_json"])
+                        except Exception:
+                            item["schema"] = None
+                    acquired.append(item)
+            else:
+                cursor.execute("""
+                    SELECT post_id FROM posts
+                    WHERE status = 'scheduled' AND scheduled_at <= ?
+                    ORDER BY scheduled_at ASC
+                    LIMIT ?
+                """, (now_iso, limit))
+                candidate_ids = [r[0] for r in cursor.fetchall()]
+
+                for pid in candidate_ids:
+                    cursor.execute("""
+                        UPDATE posts
+                        SET status = 'publishing', updated_at = CURRENT_TIMESTAMP
+                        WHERE post_id = ? AND status = 'scheduled'
+                    """, (pid,))
+                    if cursor.rowcount > 0:
+                        cursor.execute("SELECT * FROM posts WHERE post_id = ?", (pid,))
+                        row = cursor.fetchone()
+                        if row:
+                            item = dict(row)
+                            if item.get("raw_schema_json"):
+                                try:
+                                    item["schema"] = json.loads(item["raw_schema_json"])
+                                except Exception:
+                                    item["schema"] = None
+                            acquired.append(item)
+                conn.commit()
+
+            return acquired
+
+    def mark_scheduled_posted(self, post_id: int, channel_id: int, message_id: int):
+        """Marks post as successfully posted."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if self.is_postgres:
+                cursor.execute("""
+                    UPDATE posts 
+                    SET status = 'posted', channel_id = %s, telegram_message_id = %s,
+                        published_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, error_message = NULL
+                    WHERE post_id = %s
+                """, (channel_id, message_id, post_id))
+                cursor.execute("""
+                    INSERT INTO sent_posts (channel_id, message_id, post_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (channel_id, message_id) DO UPDATE SET post_id = EXCLUDED.post_id;
+                """, (channel_id, message_id, post_id))
+            else:
+                cursor.execute("""
+                    UPDATE posts 
+                    SET status = 'posted', channel_id = ?, telegram_message_id = ?,
+                        published_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, error_message = NULL
+                    WHERE post_id = ?
+                """, (channel_id, message_id, post_id))
+                cursor.execute("INSERT OR REPLACE INTO sent_posts (channel_id, message_id, post_id) VALUES (?, ?, ?)", (channel_id, message_id, post_id))
+                conn.commit()
+
+    def mark_scheduled_failed(self, post_id: int, error_message: str):
+        """Marks post as failed with error details."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                UPDATE posts 
+                SET status = 'failed', error_message = """ + ("%s, updated_at = CURRENT_TIMESTAMP WHERE post_id = %s" if self.is_postgres else "?, updated_at = CURRENT_TIMESTAMP WHERE post_id = ?")
+            cursor.execute(query, (str(error_message), post_id))
+            if not self.is_postgres:
+                conn.commit()
+
+    def recover_stale_publishing_posts(self, stale_seconds: int = 300) -> int:
+        """Resets posts stuck in 'publishing' longer than stale_seconds back to 'scheduled'."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if self.is_postgres:
+                cursor.execute("""
+                    UPDATE posts
+                    SET status = 'scheduled', updated_at = CURRENT_TIMESTAMP
+                    WHERE status = 'publishing' AND (updated_at <= CURRENT_TIMESTAMP - (%s || ' seconds')::interval OR %s <= 0)
+                """, (str(stale_seconds), stale_seconds))
+                return cursor.rowcount
+            else:
+                cursor.execute("""
+                    UPDATE posts
+                    SET status = 'scheduled', updated_at = CURRENT_TIMESTAMP
+                    WHERE status = 'publishing' AND (updated_at <= datetime('now', '-' || ? || ' seconds') OR ? <= 0)
+                """, (str(stale_seconds), stale_seconds))
+                conn.commit()
+                return cursor.rowcount
+

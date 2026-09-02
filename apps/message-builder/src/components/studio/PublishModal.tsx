@@ -9,22 +9,24 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Send, AlertTriangle, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Send, AlertTriangle, ShieldCheck, Calendar } from 'lucide-react';
 
 interface PublishModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirmPublish: () => void;
+  onOpenSchedule?: () => void;
   post: PostSchema;
-  isPublishing: boolean;
+  isPublishing?: boolean;
 }
 
 export const PublishModal: React.FC<PublishModalProps> = ({
   isOpen,
   onClose,
   onConfirmPublish,
+  onOpenSchedule,
   post,
-  isPublishing,
+  isPublishing = false,
 }) => {
   const isNeedsVerification = post.verification?.status === 'needs_verification';
 
@@ -89,21 +91,39 @@ export const PublishModal: React.FC<PublishModalProps> = ({
           </div>
         )}
 
-        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 pt-3 w-full sm:justify-end">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onClose}
-            disabled={isPublishing}
-            className="w-full sm:w-auto h-10 sm:h-8 border-slate-800 text-slate-300 hover:bg-slate-900 text-xs font-medium"
-          >
-            Cancel
-          </Button>
+        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 pt-3 w-full sm:justify-between items-center">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              disabled={isPublishing}
+              className="w-full sm:w-auto h-10 sm:h-8 border-slate-800 text-slate-300 hover:bg-slate-900 text-xs font-medium"
+            >
+              Cancel
+            </Button>
+            {onOpenSchedule && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onClose();
+                  onOpenSchedule();
+                }}
+                disabled={isPublishing}
+                className="w-full sm:w-auto h-10 sm:h-8 border-cyan-800/80 bg-cyan-950/20 text-cyan-300 hover:bg-cyan-950/50 text-xs font-medium flex items-center justify-center gap-1.5"
+              >
+                <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                Schedule for Later
+              </Button>
+            )}
+          </div>
+
           <Button
             size="sm"
             onClick={onConfirmPublish}
             disabled={isPublishing}
-            className="w-full sm:w-auto h-11 sm:h-8 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-sm sm:text-xs shadow-lg shadow-cyan-950"
+            className="w-full sm:w-auto h-11 sm:h-8 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-sm sm:text-xs shadow-lg shadow-cyan-950 shrink-0"
           >
             {isPublishing ? (
               'Publishing...'

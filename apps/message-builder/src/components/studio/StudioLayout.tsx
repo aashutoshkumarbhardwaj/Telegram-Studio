@@ -1,8 +1,22 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { DraftListItem, PostSchema } from '@/types/postSchema';
 import { QualityScores, HookOption } from '@/types/generator';
+import { ScheduledPost } from '@/types/scheduler';
 import { TemplateStyle } from '@/lib/templates';
-import { fetchDrafts, fetchDraftById, saveDraftPost, deleteDraftById, publishDraftToTelegram, onAuthRequired, checkAuthStatus } from '@/lib/api';
+import {
+  fetchDrafts,
+  fetchDraftById,
+  saveDraftPost,
+  deleteDraftById,
+  publishDraftToTelegram,
+  fetchScheduledPosts,
+  reschedulePost,
+  publishScheduledNow,
+  cancelScheduledPost,
+  deleteScheduledPost,
+  onAuthRequired,
+  checkAuthStatus,
+} from '@/lib/api';
 import { TopNav } from './TopNav';
 import { ContentEditor } from './ContentEditor';
 import { TelegramPreview } from './TelegramPreview';
@@ -11,6 +25,8 @@ import { DraftsDrawer } from './DraftsDrawer';
 import { PublishModal } from './PublishModal';
 import { StudioAuthModal } from './StudioAuthModal';
 import { AIGeneratorModal } from './AIGeneratorModal';
+import { ScheduleDialog } from './ScheduleDialog';
+import { ScheduledDrawer } from './ScheduledDrawer';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -54,6 +70,9 @@ export const StudioLayout: React.FC = () => {
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAIGenOpen, setIsAIGenOpen] = useState(false);
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+  const [isScheduledDrawerOpen, setIsScheduledDrawerOpen] = useState(false);
+  const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
   const [qualityMetrics, setQualityMetrics] = useState<QualityScores | undefined>(undefined);
   const [hookOptions, setHookOptions] = useState<HookOption[] | undefined>(undefined);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -65,9 +84,21 @@ export const StudioLayout: React.FC = () => {
   const historyIndexRef = useRef<number>(0);
   const isUndoRedoActionRef = useRef<boolean>(false);
 
-  // Load drafts and verify auth on mount
+  const loadScheduledList = useCallback(async () => {
+    const res = await fetchScheduledPosts();
+    if (res.success) {
+      setScheduledPosts(res.scheduled_posts);
+    }
+  }, []);
+
+  const activeScheduledCount = useMemo(() => {
+    return scheduledPosts.filter((p) => p.status === 'scheduled').length;
+  }, [scheduledPosts]);
+
+  // Load drafts, scheduled posts and verify auth on mount
   useEffect(() => {
     loadDraftsList();
+    loadScheduledList();
 
     const unsubscribe = onAuthRequired((required) => {
       setIsAuthModalOpen(required);
@@ -80,7 +111,7 @@ export const StudioLayout: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [loadScheduledList]);
 
   const loadDraftsList = async () => {
     const list = await fetchDrafts();
@@ -239,6 +270,58 @@ export const StudioLayout: React.FC = () => {
     }
   };
 
+  // Scheduling handlers
+  const handleReschedulePost = async (postId: number, newTimeIso: string) => {
+    const res = await reschedulePost(postId, newTimeIso);
+    if (res.success) {
+      toast.success('Post rescheduled successfully!');
+      await loadScheduledList();
+      return true;
+    }
+    toast.error(res.error || 'Failed to reschedule post');
+    return false;
+  };
+
+  const handlePublishScheduledNow = async (postId: number) => {
+    const res = await publishScheduledNow(postId);
+    if (res.success) {
+      toast.success(`Published to Telegram! (Message #${res.message_id || 'OK'})`);
+      await loadScheduledList();
+      return true;
+    }
+    toast.error(res.error || 'Failed to publish');
+    return false;
+  };
+
+  const handleCancelSchedule = async (postId: number) => {
+    const res = await cancelScheduledPost(postId);
+    if (res.success) {
+      toast.success('Schedule cancelled.');
+      await loadScheduledList();
+      return true;
+    }
+    toast.error(res.error || 'Failed to cancel schedule');
+    return false;
+  };
+
+  const handleDeleteSchedule = async (postId: number) => {
+    const res = await deleteScheduledPost(postId);
+    if (res.success) {
+      toast.success('Scheduled record deleted.');
+      await loadScheduledList();
+      return true;
+    }
+    toast.error(res.error || 'Failed to delete record');
+    return false;
+  };
+
+  const handleEditScheduledPost = (scheduledPost: PostSchema, postId: number) => {
+    setPost(scheduledPost);
+    setCurrentDraftId(postId);
+    pushHistory(scheduledPost);
+    setActiveMobileTab('edit');
+  };
+
   // Handle AI Generated Post
   const handlePostGenerated = (
     newPost: PostSchema,
@@ -266,6 +349,11 @@ export const StudioLayout: React.FC = () => {
         onOpenDrafts={() => setIsDraftsOpen(true)}
         onNewDraft={handleNewDraft}
         onOpenAIGenerator={() => setIsAIGenOpen(true)}
+        onOpenScheduled={() => {
+          loadScheduledList();
+          setIsScheduledDrawerOpen(true);
+        }}
+        scheduledCount={activeScheduledCount}
         onSave={handleSave}
         onPublishClick={() => setIsPublishModalOpen(true)}
         onOpenAuth={() => setIsAuthModalOpen(true)}
@@ -452,8 +540,32 @@ export const StudioLayout: React.FC = () => {
         isOpen={isPublishModalOpen}
         onClose={() => setIsPublishModalOpen(false)}
         onConfirmPublish={handleConfirmPublish}
+        onOpenSchedule={() => setIsScheduleOpen(true)}
         post={post}
         isPublishing={isPublishing}
+      />
+
+      <ScheduleDialog
+        isOpen={isScheduleOpen}
+        onClose={() => setIsScheduleOpen(false)}
+        post={post}
+        postId={currentDraftId}
+        onScheduledSuccess={(scheduled) => {
+          loadScheduledList();
+          loadDraftsList();
+        }}
+      />
+
+      <ScheduledDrawer
+        isOpen={isScheduledDrawerOpen}
+        onClose={() => setIsScheduledDrawerOpen(false)}
+        scheduledPosts={scheduledPosts}
+        onRefresh={loadScheduledList}
+        onEditPost={handleEditScheduledPost}
+        onReschedulePost={handleReschedulePost}
+        onPublishNow={handlePublishScheduledNow}
+        onCancelSchedule={handleCancelSchedule}
+        onDeleteSchedule={handleDeleteSchedule}
       />
 
       <StudioAuthModal
@@ -461,6 +573,7 @@ export const StudioLayout: React.FC = () => {
         onClose={() => setIsAuthModalOpen(false)}
         onAuthenticated={() => {
           loadDraftsList();
+          loadScheduledList();
         }}
       />
 
