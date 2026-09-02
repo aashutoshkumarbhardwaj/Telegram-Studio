@@ -73,7 +73,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-6 p-4 pb-12 overflow-y-auto max-w-full">
+    <div className="flex flex-col gap-5 sm:gap-6 p-3 sm:p-4 pb-28 sm:pb-12 overflow-y-auto max-w-full">
       {/* 1. Quality Analyzer Score Card */}
       {quality && (
         <div className="flex flex-col gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-xl">

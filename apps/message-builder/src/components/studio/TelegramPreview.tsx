@@ -1,16 +1,19 @@
 import React from 'react';
 import { PostSchema } from '@/types/postSchema';
 import { TemplateStyle, formatPostHtml } from '@/lib/templates';
-import { ExternalLink, CheckCheck, Eye } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ExternalLink, CheckCheck, Eye, Send } from 'lucide-react';
 
 interface TelegramPreviewProps {
   post: PostSchema;
   templateStyle: TemplateStyle;
+  onPublishClick?: () => void;
 }
 
 export const TelegramPreview: React.FC<TelegramPreviewProps> = ({
   post,
   templateStyle,
+  onPublishClick,
 }) => {
   const formattedHtml = formatPostHtml(post, templateStyle);
   const media = post.media && post.media.length > 0 ? post.media[0] : null;
@@ -23,7 +26,7 @@ export const TelegramPreview: React.FC<TelegramPreviewProps> = ({
   }
 
   return (
-    <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center p-2 sm:p-4">
+    <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center p-2 sm:p-4 pb-28 sm:pb-4">
       {/* Device / Telegram Frame Wrapper */}
       <div className="w-full bg-slate-950/90 border border-slate-800/80 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-xl">
         {/* Telegram Channel Header */}
@@ -107,6 +110,24 @@ export const TelegramPreview: React.FC<TelegramPreviewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Mobile Quick Publish Action Card */}
+      {onPublishClick && (
+        <div className="w-full mt-3 p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3 shadow-lg md:hidden">
+          <div className="min-w-0">
+            <h4 className="text-xs font-semibold text-white truncate">Ready to broadcast?</h4>
+            <p className="text-[11px] text-slate-400 truncate">Publish directly to Telegram</p>
+          </div>
+          <Button
+            size="sm"
+            onClick={onPublishClick}
+            className="h-9 px-3.5 text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950 shrink-0"
+          >
+            <Send className="w-3.5 h-3.5 mr-1.5" />
+            Publish
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

@@ -156,7 +156,7 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-xl bg-slate-950/95 border-slate-700/80 backdrop-blur-2xl text-slate-100 shadow-2xl z-50 overflow-hidden">
+      <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-xl max-h-[92vh] overflow-y-auto bg-slate-950/95 border-slate-700/80 backdrop-blur-2xl text-slate-100 shadow-2xl z-50 p-4 sm:p-6 rounded-2xl">
         <DialogHeader className="space-y-1.5">
           <div className="flex items-center gap-2 text-cyan-400">
             <div className="w-8 h-8 rounded-lg bg-cyan-950/60 border border-cyan-800/80 flex items-center justify-center shadow-inner">
@@ -218,12 +218,12 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
                 }}
                 rows={5}
                 disabled={isGenerating}
-                className="bg-slate-900/80 border-slate-700/80 text-white placeholder:text-slate-500 text-xs focus-visible:ring-cyan-500 resize-none font-sans leading-relaxed"
+                className="bg-slate-900/80 border-slate-700/80 text-white placeholder:text-slate-500 text-sm sm:text-xs focus-visible:ring-cyan-500 resize-none font-sans leading-relaxed"
                 autoFocus
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col sm:grid sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="ai-category" className="text-xs font-medium text-slate-300">
                   Target Category
@@ -233,7 +233,7 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
                   onValueChange={(val) => setCategory(val as any)}
                   disabled={isGenerating}
                 >
-                  <SelectTrigger id="ai-category" className="h-8 text-xs bg-slate-900/80 border-slate-700/80 text-slate-200">
+                  <SelectTrigger id="ai-category" className="h-9 sm:h-8 text-xs bg-slate-900/80 border-slate-700/80 text-slate-200">
                     <SelectValue placeholder="Auto Detect" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-900 border-slate-700 text-slate-200 text-xs z-50">
@@ -253,7 +253,7 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowNotes(!showNotes)}
-                  className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 h-8 px-1"
+                  className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 h-9 sm:h-8 px-1"
                 >
                   {showNotes ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   {showNotes ? 'Hide Focus Notes' : '+ Add Focus Notes'}
@@ -298,13 +298,13 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={onClose}
                 disabled={isGenerating}
-                className="text-xs text-slate-400 hover:text-white"
+                className="w-full sm:w-auto h-10 sm:h-8 text-xs text-slate-400 hover:text-white"
               >
                 Cancel
               </Button>
@@ -312,7 +312,7 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
                 size="sm"
                 onClick={handleGenerate}
                 disabled={isGenerating || !inputVal.trim()}
-                className="text-xs font-medium bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
+                className="w-full sm:w-auto h-11 sm:h-8 text-sm sm:text-xs font-medium bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
               >
                 {isGenerating ? (
                   <>
@@ -411,29 +411,29 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
             </div>
 
             {/* Modal Actions */}
-            <div className="flex justify-between items-center pt-2">
+            <div className="flex flex-col-reverse sm:flex-row justify-between items-stretch sm:items-center gap-2 pt-2">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setGenResult(null)}
-                className="text-xs text-slate-400 hover:text-white"
+                className="w-full sm:w-auto h-10 sm:h-8 text-xs text-slate-400 hover:text-white"
               >
                 <RefreshCw className="w-3.5 h-3.5 mr-1" />
                 Regenerate / Edit Input
               </Button>
-              <div className="flex gap-2">
+              <div className="flex gap-2 w-full sm:w-auto">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={onClose}
-                  className="text-xs border-slate-700 text-slate-300 hover:bg-slate-800"
+                  className="flex-1 sm:flex-initial h-11 sm:h-8 text-xs border-slate-700 text-slate-300 hover:bg-slate-800"
                 >
                   Close
                 </Button>
                 <Button
                   size="sm"
                   onClick={handleOpenInEditor}
-                  className="text-xs font-medium bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
+                  className="flex-1 sm:flex-initial h-11 sm:h-8 text-sm sm:text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
                 >
                   Open in Editor →
                 </Button>

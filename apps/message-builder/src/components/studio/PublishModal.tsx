@@ -30,7 +30,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isPublishing && onClose()}>
-      <DialogContent className="max-w-md p-6 bg-slate-950 border-slate-800 text-slate-100">
+      <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-md p-4 sm:p-6 max-h-[92vh] overflow-y-auto bg-slate-950 border-slate-800 text-slate-100 rounded-2xl">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold text-white flex items-center gap-2">
             <Send className="w-4 h-4 text-cyan-400" />
@@ -89,13 +89,13 @@ export const PublishModal: React.FC<PublishModalProps> = ({
           </div>
         )}
 
-        <DialogFooter className="flex gap-2 pt-2">
+        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 pt-3 w-full sm:justify-end">
           <Button
             variant="outline"
             size="sm"
             onClick={onClose}
             disabled={isPublishing}
-            className="border-slate-800 text-slate-300 hover:bg-slate-900"
+            className="w-full sm:w-auto h-10 sm:h-8 border-slate-800 text-slate-300 hover:bg-slate-900 text-xs font-medium"
           >
             Cancel
           </Button>
@@ -103,13 +103,13 @@ export const PublishModal: React.FC<PublishModalProps> = ({
             size="sm"
             onClick={onConfirmPublish}
             disabled={isPublishing}
-            className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white"
+            className="w-full sm:w-auto h-11 sm:h-8 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-sm sm:text-xs shadow-lg shadow-cyan-950"
           >
             {isPublishing ? (
               'Publishing...'
             ) : (
               <>
-                <Send className="w-3.5 h-3.5 mr-1.5" /> Confirm & Publish
+                <Send className="w-4 h-4 sm:w-3.5 sm:h-3.5 mr-1.5" /> Confirm & Publish
               </>
             )}
           </Button>

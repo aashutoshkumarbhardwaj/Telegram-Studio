@@ -62,7 +62,7 @@ export const StudioAuthModal: React.FC<StudioAuthModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md bg-slate-900/95 border-slate-700/80 backdrop-blur-2xl text-slate-100 shadow-2xl z-50">
+      <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-md bg-slate-900/95 border-slate-700/80 backdrop-blur-2xl text-slate-100 shadow-2xl z-50 p-4 sm:p-6 rounded-2xl">
         <DialogHeader className="space-y-2">
           <div className="mx-auto w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-1">
             <Lock className="w-6 h-6" />
@@ -127,14 +127,14 @@ export const StudioAuthModal: React.FC<StudioAuthModalProps> = ({
               variant="ghost"
               onClick={onClose}
               disabled={isLoading}
-              className="flex-1 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              className="flex-1 h-11 sm:h-9 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={isLoading || !tokenInput.trim()}
-              className="flex-1 text-xs font-medium bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-900/20"
+              className="flex-1 h-11 sm:h-9 text-sm sm:text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-900/20"
             >
               {isLoading ? (
                 <>

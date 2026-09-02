@@ -26,6 +26,7 @@ interface ContentEditorProps {
   templateStyle: TemplateStyle;
   onPostChange: (updater: (prev: PostSchema) => PostSchema) => void;
   onTemplateChange: (style: TemplateStyle) => void;
+  onOpenAIGenerator?: () => void;
 }
 
 export const ContentEditor: React.FC<ContentEditorProps> = ({
@@ -33,6 +34,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
   templateStyle,
   onPostChange,
   onTemplateChange,
+  onOpenAIGenerator,
 }) => {
   const [newTakeaway, setNewTakeaway] = useState('');
   const [newButtonText, setNewButtonText] = useState('');
@@ -166,7 +168,29 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
   const meta = post.metadata || {};
 
   return (
-    <div className="flex flex-col gap-6 p-4 pb-12 overflow-y-auto max-w-full">
+    <div className="flex flex-col gap-5 sm:gap-6 p-3 sm:p-4 pb-28 sm:pb-12 overflow-y-auto max-w-full">
+      {/* Quick AI Generator Banner for Mobile / Fast Entry */}
+      {onOpenAIGenerator && (
+        <div className="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-slate-900/50 border border-cyan-500/30 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-cyan-900/60 border border-cyan-700/60 flex items-center justify-center text-cyan-300">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-white">Generate with AI</h4>
+              <p className="text-[10px] text-slate-400">Paste URL, text, or rough idea</p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={onOpenAIGenerator}
+            className="h-8 px-3 text-xs font-medium bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-sm"
+          >
+            ✨ Start
+          </Button>
+        </div>
+      )}
+
       {/* 1. Content Type & Template Style */}
       <div className="flex flex-col gap-2 p-3 bg-muted/20 border border-border/60 rounded-xl">
         <div className="flex items-center justify-between">
@@ -180,7 +204,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
           <div>
             <span className="text-[11px] text-muted-foreground mb-1 block">Category</span>
             <Select value={post.content_type} onValueChange={(v) => handleContentTypeChange(v as ContentType)}>
-              <SelectTrigger className="h-8 text-xs bg-background/80">
+              <SelectTrigger className="h-9 sm:h-8 text-xs bg-background/80">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
               <SelectContent>
@@ -199,7 +223,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
           <div>
             <span className="text-[11px] text-muted-foreground mb-1 block">Template Layout</span>
             <Select value={templateStyle} onValueChange={(v) => onTemplateChange(v as TemplateStyle)}>
-              <SelectTrigger className="h-8 text-xs bg-background/80">
+              <SelectTrigger className="h-9 sm:h-8 text-xs bg-background/80">
                 <SelectValue placeholder="Template" />
               </SelectTrigger>
               <SelectContent>
@@ -230,7 +254,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
             value={post.title}
             onChange={(e) => handleTitleChange(e.target.value)}
             placeholder="e.g. Google DeepMind Unveils Next-Gen Gemini Reasoning Architecture"
-            className="text-sm font-medium bg-background/80"
+            className="text-base sm:text-sm font-medium bg-background/80 h-10 sm:h-9"
           />
         </div>
 
@@ -241,7 +265,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
             onChange={(e) => handleBodyChange(e.target.value)}
             placeholder="Explain the core announcement concisely..."
             rows={4}
-            className="text-xs leading-relaxed bg-background/80"
+            className="text-base sm:text-xs leading-relaxed bg-background/80"
           />
         </div>
 

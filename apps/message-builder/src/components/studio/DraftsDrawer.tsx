@@ -42,8 +42,8 @@ export const DraftsDrawer: React.FC<DraftsDrawerProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-xl max-h-[85vh] flex flex-col p-6 bg-slate-950 border-slate-800 text-slate-100">
-        <DialogHeader className="flex flex-row items-center justify-between pb-2 border-b border-slate-800">
+      <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-xl max-h-[88vh] flex flex-col p-4 sm:p-6 bg-slate-950 border-slate-800 text-slate-100 rounded-2xl">
+        <DialogHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-800">
           <div>
             <DialogTitle className="text-base font-semibold text-white">Saved Drafts</DialogTitle>
             <DialogDescription className="text-xs text-slate-400">
@@ -56,7 +56,7 @@ export const DraftsDrawer: React.FC<DraftsDrawerProps> = ({
               onNewDraft();
               onClose();
             }}
-            className="h-8 text-xs bg-cyan-600 hover:bg-cyan-500 text-white"
+            className="w-full sm:w-auto h-9 sm:h-8 text-xs bg-cyan-600 hover:bg-cyan-500 text-white font-medium"
           >
             <Plus className="w-3.5 h-3.5 mr-1" /> New Post
           </Button>
