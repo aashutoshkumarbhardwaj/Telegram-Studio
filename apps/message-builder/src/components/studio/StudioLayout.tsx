@@ -28,7 +28,6 @@ import { AIGeneratorModal } from './AIGeneratorModal';
 import { ScheduleDialog } from './ScheduleDialog';
 import { ScheduledDrawer } from './ScheduledDrawer';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Save, Send } from 'lucide-react';
 import { toast } from 'sonner';
@@ -343,7 +342,7 @@ export const StudioLayout: React.FC = () => {
   const canRedo = historyIndexRef.current < historyRef.current.length - 1;
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-black text-foreground overflow-hidden font-sans">
+    <div className="h-[100dvh] w-full flex flex-col min-h-0 bg-gradient-to-br from-slate-950 via-slate-900 to-black text-foreground overflow-hidden font-sans">
       {/* Top Bar */}
       <TopNav
         onOpenDrafts={() => setIsDraftsOpen(true)}
@@ -407,63 +406,54 @@ export const StudioLayout: React.FC = () => {
         </ResizablePanelGroup>
       </div>
 
-      {/* Mobile Workspace: Responsive Tabs & Content */}
-      <div className="flex-1 w-full md:hidden flex flex-col overflow-hidden relative">
-        <Tabs value={activeMobileTab} onValueChange={(v) => setActiveMobileTab(v as any)} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid grid-cols-3 bg-slate-900/90 border-b border-border/60 h-10 rounded-none shrink-0">
-            <TabsTrigger value="edit" className="text-xs font-medium">
-              ✏️ Editor
-            </TabsTrigger>
-            <TabsTrigger value="preview" className="text-xs font-medium">
-              👁 Preview
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="text-xs font-medium flex items-center justify-center gap-1">
-              <span>⚙️ Settings</span>
-              {qualityMetrics && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              )}
-            </TabsTrigger>
-          </TabsList>
+      {/* Mobile Workspace: Responsive Single Dedicated Scroll Area */}
+      <div className="flex-1 w-full md:hidden flex flex-col min-h-0 relative overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 pb-32">
+          {activeMobileTab === 'edit' && (
+            <div className="max-w-xl mx-auto">
+              <ContentEditor
+                post={post}
+                templateStyle={templateStyle}
+                onPostChange={handlePostChange}
+                onTemplateChange={setTemplateStyle}
+                onOpenAIGenerator={() => setIsAIGenOpen(true)}
+              />
+            </div>
+          )}
 
-          <TabsContent value="edit" className="flex-1 overflow-y-auto p-2 m-0">
-            <ContentEditor
-              post={post}
-              templateStyle={templateStyle}
-              onPostChange={handlePostChange}
-              onTemplateChange={setTemplateStyle}
-              onOpenAIGenerator={() => setIsAIGenOpen(true)}
-            />
-          </TabsContent>
+          {activeMobileTab === 'preview' && (
+            <div className="max-w-xl mx-auto flex items-center justify-center pt-2">
+              <TelegramPreview
+                post={post}
+                templateStyle={templateStyle}
+                onPublishClick={() => setIsPublishModalOpen(true)}
+              />
+            </div>
+          )}
 
-          <TabsContent value="preview" className="flex-1 overflow-y-auto p-2 flex items-center justify-center m-0">
-            <TelegramPreview
-              post={post}
-              templateStyle={templateStyle}
-              onPublishClick={() => setIsPublishModalOpen(true)}
-            />
-          </TabsContent>
-
-          <TabsContent value="settings" className="flex-1 overflow-y-auto p-2 m-0">
-            <SettingsPanel
-              post={post}
-              templateStyle={templateStyle}
-              quality={qualityMetrics}
-              hooks={hookOptions}
-              onSelectHook={(h) => handlePostChange((p) => ({ ...p, title: h }))}
-            />
-          </TabsContent>
-        </Tabs>
+          {activeMobileTab === 'settings' && (
+            <div className="max-w-xl mx-auto">
+              <SettingsPanel
+                post={post}
+                templateStyle={templateStyle}
+                quality={qualityMetrics}
+                hooks={hookOptions}
+                onSelectHook={(h) => handlePostChange((p) => ({ ...p, title: h }))}
+              />
+            </div>
+          )}
+        </div>
 
         {/* Mobile Sticky Bottom Floating Action Bar */}
-        <div className="sticky bottom-0 left-0 right-0 z-40 bg-slate-950/95 border-t border-slate-800/90 backdrop-blur-xl px-2.5 py-2 flex items-center justify-between gap-2 shadow-2xl shrink-0">
+        <div className="sticky bottom-0 left-0 right-0 z-40 bg-slate-950/90 border-t border-slate-800/80 backdrop-blur-2xl px-3 py-2.5 flex items-center justify-between gap-2 shadow-[0_-10px_30px_rgba(0,0,0,0.7)] shrink-0">
           {/* Quick Tab Switcher */}
-          <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 p-0.5 rounded-xl">
+          <div className="flex items-center gap-1 bg-slate-900/80 border border-slate-800/80 p-1 rounded-2xl">
             <button
               type="button"
               onClick={() => setActiveMobileTab('edit')}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                 activeMobileTab === 'edit'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  ? 'bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-300 border border-cyan-500/50 shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -472,9 +462,9 @@ export const StudioLayout: React.FC = () => {
             <button
               type="button"
               onClick={() => setActiveMobileTab('preview')}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                 activeMobileTab === 'preview'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  ? 'bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-300 border border-cyan-500/50 shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -483,15 +473,15 @@ export const StudioLayout: React.FC = () => {
             <button
               type="button"
               onClick={() => setActiveMobileTab('settings')}
-              className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
                 activeMobileTab === 'settings'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  ? 'bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-300 border border-cyan-500/50 shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
               <span>⚙️</span>
               {qualityMetrics && (
-                <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-950 text-emerald-300 font-mono">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono font-bold">
                   {qualityMetrics.overall}
                 </span>
               )}
@@ -499,12 +489,12 @@ export const StudioLayout: React.FC = () => {
           </div>
 
           {/* Quick Actions: Save & Publish */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={handleSave}
-              className="h-9 px-2.5 text-xs border-slate-700 bg-slate-900/90 text-slate-200"
+              className="h-10 px-3 text-xs font-semibold border-slate-800 bg-slate-900/80 hover:bg-slate-800 text-slate-200 rounded-xl shadow-sm"
               title="Save draft"
             >
               <Save className="w-3.5 h-3.5 mr-1 text-slate-400" />
@@ -515,7 +505,7 @@ export const StudioLayout: React.FC = () => {
               size="sm"
               onClick={() => setIsPublishModalOpen(true)}
               disabled={isPublishing}
-              className="h-9 px-3 text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-950/60"
+              className="h-10 px-3.5 text-xs font-bold bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-950/80 rounded-xl transition-all"
             >
               <Send className="w-3.5 h-3.5 mr-1" />
               {isPublishing ? '...' : 'Publish'}

@@ -247,12 +247,12 @@ export const TopNav: React.FC<TopNavProps> = ({
           Save
         </Button>
 
-        {/* Primary Publish Button (Always visible on mobile & desktop) */}
+        {/* Primary Publish Button (Desktop only, mobile uses sticky bottom bar) */}
         <Button
           size="sm"
           onClick={onPublishClick}
           disabled={isPublishing}
-          className="h-8 px-2.5 sm:px-3 text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
+          className="hidden sm:flex h-8 px-3 text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
         >
           <Send className="w-3.5 h-3.5 mr-1" />
           <span>{isPublishing ? 'Publishing...' : 'Publish'}</span>

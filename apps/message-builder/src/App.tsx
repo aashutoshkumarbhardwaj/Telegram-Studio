@@ -148,7 +148,6 @@ const App = () => (
           </Routes>
         </Suspense>
       </BrowserRouter>
-      <RepoBadge />
     </TooltipProvider>
   </ErrorBoundary>
 );
