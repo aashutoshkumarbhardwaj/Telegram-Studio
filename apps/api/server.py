@@ -25,8 +25,9 @@ from apps.bot.handlers.preview_actions import router as preview_actions_router
 from apps.bot.handlers.research import router as research_router
 from apps.bot.handlers.start import router as start_router
 
+from packages.ai import UrlFetchError, generate_hook_options, generate_post_from_input
 from packages.formatter import format_post_text, generate_telegram_payload, validate_telegram_constraints
-from packages.post_schema import PostSchema
+from packages.post_schema import ContentType, PostSchema
 from packages.shared.config import (
     ALLOWED_ORIGINS,
     BOT_TOKEN,
@@ -405,6 +406,76 @@ async def publish_post_endpoint(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
 
 
+async def generate_post_endpoint(request: web.Request) -> web.Response:
+    """POST /api/generate — AI Content Generator for Heyaaashu Studio."""
+    db: StudioDatabase = request.app["db"]
+    cors = _get_cors_headers(request)
+    try:
+        body = await request.json()
+        raw_input = body.get("input", "").strip()
+        if not raw_input:
+            return web.json_response({
+                "success": False,
+                "error": "Input cannot be empty. Please enter a URL, article, or idea."
+            }, status=400, headers=cors)
+
+        category = body.get("category", "auto")
+        notes = body.get("notes", "")
+
+        result = await generate_post_from_input(
+            raw_input=raw_input,
+            category_override=category,
+            notes=notes,
+        )
+
+        post: PostSchema = result["post"]
+        # Save as draft in database
+        user_id = body.get("user_id", 1)
+        draft_id = db.save_draft(user_id=user_id, post=post, status="draft")
+
+        return web.json_response({
+            "success": True,
+            "draft_id": draft_id,
+            "post": post.model_dump(),
+            "quality": result["quality"],
+            "generation": result["generation"],
+            "visual": result["visual"],
+        }, status=200, headers=cors)
+
+    except UrlFetchError as e:
+        return web.json_response({
+            "success": False,
+            "error": "Couldn't read this URL.",
+            "details": str(e),
+            "url_error": True,
+        }, status=422, headers=cors)
+    except Exception as e:
+        logger.error(f"Generation failed: {e}", exc_info=True)
+        return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
+
+
+async def generate_hook_endpoint(request: web.Request) -> web.Response:
+    """POST /api/generate/hook — Generates or ranks 3 alternative headline hooks."""
+    cors = _get_cors_headers(request)
+    try:
+        body = await request.json()
+        title = body.get("title", "")
+        text = body.get("text", "")
+        category_str = body.get("category", "ai_news")
+        try:
+            category = ContentType(category_str)
+        except Exception:
+            category = ContentType.AI_NEWS
+
+        hooks = generate_hook_options(title, text, category)
+        return web.json_response({
+            "success": True,
+            "hooks": [h.model_dump() for h in hooks],
+        }, headers=cors)
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400, headers=cors)
+
+
 # ─── SPA STATIC ASSETS FALLBACK ─────────────────────────────────────────────────
 
 async def serve_spa_index(request: web.Request) -> web.Response:
@@ -483,6 +554,8 @@ def create_app(
     app.router.add_delete("/api/drafts/{id}", delete_draft)
     app.router.add_post("/api/preview", generate_preview)
     app.router.add_post("/api/publish", publish_post_endpoint)
+    app.router.add_post("/api/generate", generate_post_endpoint)
+    app.router.add_post("/api/generate/hook", generate_hook_endpoint)
 
     # Static assets routes if compiled dist exists
     dist_dir = Path(__file__).resolve().parent.parent / "message-builder" / "dist"

@@ -5,6 +5,7 @@
  */
 
 import { DraftListItem, PostSchema } from '@/types/postSchema';
+import { GenerateRequest, GenerateResponse, HookResponse } from '@/types/generator';
 
 export function getApiBaseUrl(): string {
   const envUrl = import.meta.env.VITE_API_URL;
@@ -323,3 +324,67 @@ export async function publishDraftToTelegram(
     return { success: false, error: e.message || 'Failed to fetch' };
   }
 }
+
+export async function generatePostFromInput(
+  req: GenerateRequest
+): Promise<GenerateResponse> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/generate`, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify(req),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return {
+        success: false,
+        error: 'Authentication required: Please enter your Studio Access Token.',
+      };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return data;
+    }
+
+    return {
+      success: false,
+      error: data.error || `HTTP ${res.status}: Generation failed`,
+      url_error: Boolean(data.url_error),
+    };
+  } catch (e: any) {
+    console.error('Generate fetch error:', e);
+    return { success: false, error: e.message || 'Failed to connect to generator API' };
+  }
+}
+
+export async function generateHookOptions(
+  title: string,
+  text: string,
+  category: string
+): Promise<HookResponse> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/generate/hook`, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({ title, text, category }),
+    });
+
+    if (res.status === 401) {
+      clearStudioAuthToken();
+      notifyAuthRequired(true);
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return data;
+    }
+    return { success: false, error: data.error || 'Failed to generate hooks' };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Hook generation request failed' };
+  }
+}
+

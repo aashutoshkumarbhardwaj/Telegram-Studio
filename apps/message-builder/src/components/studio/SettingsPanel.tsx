@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PostSchema } from '@/types/postSchema';
+import { QualityScores, HookOption } from '@/types/generator';
 import { TemplateStyle, formatPostHtml } from '@/lib/templates';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -13,17 +14,25 @@ import {
   FileText,
   ShieldAlert,
   Sliders,
+  Activity,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface SettingsPanelProps {
   post: PostSchema;
   templateStyle: TemplateStyle;
+  quality?: QualityScores;
+  hooks?: HookOption[];
+  onSelectHook?: (hookText: string) => void;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   post,
   templateStyle,
+  quality,
+  hooks,
+  onSelectHook,
 }) => {
   const [copiedJson, setCopiedJson] = useState(false);
   const [copiedHtml, setCopiedHtml] = useState(false);
@@ -65,7 +74,80 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   return (
     <div className="flex flex-col gap-6 p-4 pb-12 overflow-y-auto max-w-full">
-      {/* 1. Quality & Limit Analyzer */}
+      {/* 1. Quality Analyzer Score Card */}
+      {quality && (
+        <div className="flex flex-col gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-cyan-400" />
+              Post Health
+            </Label>
+            <span
+              className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                quality.overall >= 80
+                  ? 'bg-emerald-950/80 border border-emerald-800 text-emerald-300'
+                  : 'bg-amber-950/80 border border-amber-800 text-amber-300'
+              }`}
+            >
+              {quality.overall}/100 {quality.status === 'ready' ? '✅ Ready' : '⚠️ Review'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+            <div className="flex justify-between p-1.5 rounded bg-slate-950/50 border border-slate-800/80">
+              <span className="text-slate-400">Hook</span>
+              <span className="font-mono text-cyan-300">{quality.hook}</span>
+            </div>
+            <div className="flex justify-between p-1.5 rounded bg-slate-950/50 border border-slate-800/80">
+              <span className="text-slate-400">Clarity</span>
+              <span className="font-mono text-cyan-300">{quality.clarity}</span>
+            </div>
+            <div className="flex justify-between p-1.5 rounded bg-slate-950/50 border border-slate-800/80">
+              <span className="text-slate-400">Value</span>
+              <span className="font-mono text-cyan-300">{quality.value}</span>
+            </div>
+            <div className="flex justify-between p-1.5 rounded bg-slate-950/50 border border-slate-800/80">
+              <span className="text-slate-400">Source</span>
+              <span className="font-mono text-cyan-300">{quality.source}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Alternative Hooks Switcher */}
+      {hooks && hooks.length > 1 && onSelectHook && (
+        <div className="flex flex-col gap-2 p-3 bg-muted/20 border border-border/60 rounded-xl">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            Headline Hook Switcher
+          </Label>
+          <div className="flex flex-col gap-1.5 pt-1">
+            {hooks.map((h, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  onSelectHook(h.text);
+                  toast.success(`Switched to hook #${idx + 1}`);
+                }}
+                className={`text-left text-xs p-2 rounded-lg border transition-all ${
+                  post.title === h.text
+                    ? 'bg-cyan-950/40 border-cyan-500 text-white font-medium'
+                    : 'bg-card/40 border-border/40 text-muted-foreground hover:text-foreground hover:bg-card/80'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-mono text-cyan-400">{h.style}</span>
+                  <span className="text-[10px] font-mono text-slate-500">{h.score} pts</span>
+                </div>
+                <p className="mt-0.5 line-clamp-2">{h.text}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 3. Quality & Limit Analyzer */}
       <div className="flex flex-col gap-3 p-3 bg-muted/20 border border-border/60 rounded-xl">
         <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
           <Sliders className="w-3.5 h-3.5 text-cyan-400" />
@@ -108,7 +190,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         )}
       </div>
 
-      {/* 2. Verification Info */}
+      {/* 4. Verification Info */}
       <div className="flex flex-col gap-2 p-3 bg-muted/20 border border-border/60 rounded-xl">
         <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
           <ShieldAlert className="w-3.5 h-3.5 text-cyan-400" />
@@ -139,7 +221,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       </div>
 
-      {/* 3. Export & Schema */}
+      {/* 5. Export & Schema */}
       <div className="flex flex-col gap-2 p-3 bg-muted/20 border border-border/60 rounded-xl">
         <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
           <Code2 className="w-3.5 h-3.5 text-cyan-400" />

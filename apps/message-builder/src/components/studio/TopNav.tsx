@@ -18,6 +18,7 @@ import {
 interface TopNavProps {
   onOpenDrafts: () => void;
   onNewDraft: () => void;
+  onOpenAIGenerator?: () => void;
   onSave: () => void;
   onPublishClick: () => void;
   onOpenAuth?: () => void;
@@ -32,6 +33,7 @@ interface TopNavProps {
 export const TopNav: React.FC<TopNavProps> = ({
   onOpenDrafts,
   onNewDraft,
+  onOpenAIGenerator,
   onSave,
   onPublishClick,
   onOpenAuth,
@@ -82,6 +84,17 @@ export const TopNav: React.FC<TopNavProps> = ({
             <PlusCircle className="w-3.5 h-3.5 mr-1.5 text-cyan-400" />
             New Post
           </Button>
+
+          {onOpenAIGenerator && (
+            <Button
+              size="sm"
+              onClick={onOpenAIGenerator}
+              className="text-xs font-medium bg-gradient-to-r from-cyan-500/20 to-blue-600/20 border border-cyan-500/40 text-cyan-300 hover:text-white hover:bg-cyan-500/30 h-8 px-2.5 shadow-sm shadow-cyan-950/50"
+            >
+              <Sparkles className="w-3.5 h-3.5 mr-1.5 text-cyan-400" />
+              AI Generate
+            </Button>
+          )}
         </div>
       </div>
 

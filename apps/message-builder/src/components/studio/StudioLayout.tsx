@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { DraftListItem, PostSchema } from '@/types/postSchema';
+import { QualityScores, HookOption } from '@/types/generator';
 import { TemplateStyle } from '@/lib/templates';
 import { fetchDrafts, fetchDraftById, saveDraftPost, deleteDraftById, publishDraftToTelegram, onAuthRequired, checkAuthStatus } from '@/lib/api';
 import { TopNav } from './TopNav';
@@ -9,6 +10,7 @@ import { SettingsPanel } from './SettingsPanel';
 import { DraftsDrawer } from './DraftsDrawer';
 import { PublishModal } from './PublishModal';
 import { StudioAuthModal } from './StudioAuthModal';
+import { AIGeneratorModal } from './AIGeneratorModal';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
@@ -49,6 +51,9 @@ export const StudioLayout: React.FC = () => {
   const [isDraftsOpen, setIsDraftsOpen] = useState(false);
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAIGenOpen, setIsAIGenOpen] = useState(false);
+  const [qualityMetrics, setQualityMetrics] = useState<QualityScores | undefined>(undefined);
+  const [hookOptions, setHookOptions] = useState<HookOption[] | undefined>(undefined);
   const [isPublishing, setIsPublishing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [activeMobileTab, setActiveMobileTab] = useState<'edit' | 'preview' | 'settings'>('edit');
@@ -232,6 +237,23 @@ export const StudioLayout: React.FC = () => {
     }
   };
 
+  // Handle AI Generated Post
+  const handlePostGenerated = (
+    newPost: PostSchema,
+    draftId: number,
+    quality?: QualityScores,
+    hooks?: HookOption[]
+  ) => {
+    setPost(newPost);
+    setCurrentDraftId(draftId);
+    setQualityMetrics(quality);
+    setHookOptions(hooks);
+    pushHistory(newPost);
+    setSaveStatus('saved');
+    setActiveMobileTab('edit');
+    loadDraftsList();
+  };
+
   const canUndo = historyIndexRef.current > 0;
   const canRedo = historyIndexRef.current < historyRef.current.length - 1;
 
@@ -241,6 +263,7 @@ export const StudioLayout: React.FC = () => {
       <TopNav
         onOpenDrafts={() => setIsDraftsOpen(true)}
         onNewDraft={handleNewDraft}
+        onOpenAIGenerator={() => setIsAIGenOpen(true)}
         onSave={handleSave}
         onPublishClick={() => setIsPublishModalOpen(true)}
         onOpenAuth={() => setIsAuthModalOpen(true)}
@@ -281,7 +304,13 @@ export const StudioLayout: React.FC = () => {
           {/* Right Panel: Settings & Quality Health */}
           <ResizablePanel defaultSize={24} minSize={20} maxSize={35} className="bg-card/30 backdrop-blur-md border-l border-border/60">
             <div className="h-full overflow-y-auto">
-              <SettingsPanel post={post} templateStyle={templateStyle} />
+              <SettingsPanel
+                post={post}
+                templateStyle={templateStyle}
+                quality={qualityMetrics}
+                hooks={hookOptions}
+                onSelectHook={(h) => handlePostChange((p) => ({ ...p, title: h }))}
+              />
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -316,7 +345,13 @@ export const StudioLayout: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="settings" className="flex-1 overflow-y-auto p-2">
-            <SettingsPanel post={post} templateStyle={templateStyle} />
+            <SettingsPanel
+              post={post}
+              templateStyle={templateStyle}
+              quality={qualityMetrics}
+              hooks={hookOptions}
+              onSelectHook={(h) => handlePostChange((p) => ({ ...p, title: h }))}
+            />
           </TabsContent>
         </Tabs>
       </div>
@@ -347,6 +382,12 @@ export const StudioLayout: React.FC = () => {
         onAuthenticated={() => {
           loadDraftsList();
         }}
+      />
+
+      <AIGeneratorModal
+        isOpen={isAIGenOpen}
+        onClose={() => setIsAIGenOpen(false)}
+        onPostGenerated={handlePostGenerated}
       />
     </div>
   );
