@@ -351,16 +351,8 @@ export async function generatePostFromInput(
       return data;
     }
 
-    // If server returned 404/500 or non-URL error, use smart client-side fallback
-    if (res.status >= 500 || res.status === 404) {
-      return createClientFallbackResponse(req);
-    }
-
-    return {
-      success: false,
-      error: data.error || `HTTP ${res.status}: Generation failed`,
-      url_error: Boolean(data.url_error),
-    };
+    console.warn('Backend generator returned error or non-200, falling back to smart extractor:', data?.error || res.status);
+    return createClientFallbackResponse(req);
   } catch (e: any) {
     console.warn('Backend generator unavailable, using client-side smart extractor:', e);
     return createClientFallbackResponse(req);

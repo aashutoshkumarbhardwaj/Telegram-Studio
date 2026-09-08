@@ -447,12 +447,33 @@ async def generate_post_endpoint(request: web.Request) -> web.Response:
         }, status=200, headers=cors)
 
     except UrlFetchError as e:
-        return web.json_response({
-            "success": False,
-            "error": "Couldn't read this URL.",
-            "details": str(e),
-            "url_error": True,
-        }, status=422, headers=cors)
+        logger.warning(f"UrlFetchError in generate endpoint: {e}. Falling back to text extraction.")
+        try:
+            fallback_text = raw_input or link
+            result = await generate_post_from_input(
+                raw_input=fallback_text,
+                category_override=category,
+                notes=notes,
+                link=link or None,
+            )
+            post: PostSchema = result["post"]
+            user_id = body.get("user_id", 1)
+            draft_id = db.save_draft(user_id=user_id, post=post, status="draft")
+            return web.json_response({
+                "success": True,
+                "draft_id": draft_id,
+                "post": post.model_dump(),
+                "quality": result["quality"],
+                "generation": result["generation"],
+                "visual": result["visual"],
+            }, status=200, headers=cors)
+        except Exception as fallback_err:
+            return web.json_response({
+                "success": False,
+                "error": "Couldn't read this URL.",
+                "details": str(fallback_err),
+                "url_error": True,
+            }, status=422, headers=cors)
     except Exception as e:
         logger.error(f"Generation failed: {e}", exc_info=True)
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)

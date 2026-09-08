@@ -480,10 +480,14 @@ async def generate_post_from_input(
     else:
         input_type = "raw_text"
 
-    # Step 1: Scrape URL if present
+    # Step 1: Scrape URL if present (graceful timeout / fallback)
     url_data: Optional[Dict[str, Any]] = None
     if primary_url:
-        url_data = await fetch_and_clean_url(primary_url, timeout=5.0)
+        try:
+            url_data = await fetch_and_clean_url(primary_url, timeout=4.0)
+        except Exception as e:
+            logger.warning(f"URL scraping unavailable for {primary_url}: {e}. Proceeding with user text.")
+            url_data = None
 
     # Combine text context
     if url_data:
@@ -491,9 +495,12 @@ async def generate_post_from_input(
         source_name = url_data["site_name"]
         content_corpus = f"{url_data['title']}\n\n{notes}\n\n{url_data['text']}"
     else:
-        lines = [l.strip() for l in clean_input.splitlines() if l.strip()]
-        title_hint = lines[0] if lines else "New Technology Update"
-        source_name = "Community / Idea"
+        source_name = "Official Source"
+        if primary_url:
+            domain_match = re.search(r"https?://(?:www\.)?([^/]+)", primary_url)
+            source_name = domain_match.group(1).capitalize() if domain_match else "Official Source"
+        lines = [l.strip() for l in (text_without_urls or clean_input).splitlines() if l.strip()]
+        title_hint = lines[0] if lines else f"{source_name} Update"
         content_corpus = f"{clean_input}\n\n{notes}" if notes else clean_input
 
     # Step 2: Detect category

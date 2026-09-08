@@ -56,37 +56,48 @@ export function getDomainSourceTitle(url: string): string {
 export function detectCategory(text: string, primaryUrl?: string): ContentType {
   const combined = `${text || ''} ${primaryUrl || ''}`.toLowerCase();
 
-  // GitHub repository
-  if (combined.includes('github.com') || /\bgit clone\b|\bstars?\b|\brepository\b/.test(combined)) {
+  // 1. Direct URL signatures
+  if (primaryUrl) {
+    const lowerUrl = primaryUrl.toLowerCase();
+    if (lowerUrl.includes('github.com')) return 'github';
+    if (lowerUrl.includes('devpost.com') || lowerUrl.includes('hackerearth.com') || lowerUrl.includes('dorahacks.io')) return 'hackathon';
+    if (lowerUrl.includes('lever.co') || lowerUrl.includes('greenhouse.io') || lowerUrl.includes('ashbyhq.com') || lowerUrl.includes('workday') || lowerUrl.includes('wellfound.com') || lowerUrl.includes('/jobs') || lowerUrl.includes('/careers')) {
+      if (/\bintern(?:ship)?\b|\bstipend\b/.test(combined)) return 'internship';
+      return 'job';
+    }
+  }
+
+  // 2. GitHub repository
+  if (combined.includes('github.com') || /\bgit clone\b|\bstars?\b|\brepository\b|\bopen[- ]source\b/.test(combined)) {
     return 'github';
   }
 
-  // Internship
-  if (/\bintern(?:ship)?\b|\bstipend\b|\bpre-final\b|\bfellowship\b/.test(combined)) {
+  // 3. Internship
+  if (/\bintern(?:ship|s)?\b|\bstipend\b|\bpre-final\b|\bfellowship\b|\bco-op\b/.test(combined)) {
     return 'internship';
   }
 
-  // Job
-  if (/\b(?:hiring|job opening|full-time|salary|apply at|compensation|we're hiring|open role|job post)\b/.test(combined)) {
+  // 4. Job
+  if (/\b(?:hiring|jobs?|job opening|open role|vacanc(?:y|ies)|full-time|salary|apply now|apply at|apply here|compensation|we're hiring|we are hiring|engineer position|remote role|careers?)\b/.test(combined)) {
     return 'job';
   }
 
-  // Hackathon
-  if (/\bhackathon\b|\bprize pool\b|\bdevpost\b|\bbounty\b|\bteam size\b|\bregister by\b/.test(combined)) {
+  // 5. Hackathon
+  if (/\bhackathon\b|\bprize pool\b|\bdevpost\b|\bbount(?:y|ies)\b|\bteam size\b|\bregister (?:by|now|today)\b/.test(combined)) {
     return 'hackathon';
   }
 
-  // AI Tool
+  // 6. AI Tool
   if (/\bai tool\b|\bsaas\b|\bpricing\b|\bfree tier\b|\bproduct hunt\b|\bplayground\b|\bweb app\b|\bchrome extension\b/.test(combined)) {
     return 'ai_tool';
   }
 
-  // Career
-  if (/\bcareer advice\b|\bresume\b|\binterview prep\b|\bsalary negotiation\b|\bpromotion\b/.test(combined)) {
+  // 7. Career
+  if (/\bcareer advice\b|\bcareer guide\b|\bresume\b|\binterview prep\b|\bsalary negotiation\b|\bpromotion\b/.test(combined)) {
     return 'career';
   }
 
-  // Resource
+  // 8. Resource
   if (/\broadmap\b|\bcheat\s?sheet\b|\bhandbook\b|\bcurated list\b|\bfree course\b|\bcomplete guide\b/.test(combined)) {
     return 'resource';
   }

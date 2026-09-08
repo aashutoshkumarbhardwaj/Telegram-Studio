@@ -79,7 +79,7 @@ describe('AI Generator API Client', () => {
     expect(capturedBody.category).toBe('ai_news');
   });
 
-  it('handles URL error response from generator endpoint', async () => {
+  it('gracefully falls back to client smart extractor on server URL error', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 422,
@@ -94,9 +94,10 @@ describe('AI Generator API Client', () => {
       input: 'https://broken-domain.invalid',
     });
 
-    expect(res.success).toBe(false);
-    expect(res.url_error).toBe(true);
-    expect(res.error).toBe("Couldn't read this URL.");
+    // Gracefully recovers with smartExtractor instead of blocking the user
+    expect(res.success).toBe(true);
+    expect(res.post).toBeDefined();
+    expect(res.post?.buttons).toBeDefined();
   });
 
   it('calls POST /api/generate/hook to retrieve alternative hooks', async () => {

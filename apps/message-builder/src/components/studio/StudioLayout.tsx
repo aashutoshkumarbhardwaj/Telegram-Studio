@@ -422,6 +422,7 @@ export const StudioLayout: React.FC = () => {
                 onOpenAIGenerator={() => setIsAIGenOpen(true)}
                 onPublishClick={() => setIsPublishModalOpen(true)}
                 isPublishing={isPublishing}
+                onViewPreview={() => setActiveMobileTab('preview')}
               />
             </div>
           )}
