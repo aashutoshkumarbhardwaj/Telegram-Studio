@@ -20,6 +20,7 @@ import {
   ChevronDown,
   X,
 } from 'lucide-react';
+import { SmartAutoFillBar } from './SmartAutoFillBar';
 
 interface ContentEditorProps {
   post: PostSchema;
@@ -27,6 +28,8 @@ interface ContentEditorProps {
   onPostChange: (updater: (prev: PostSchema) => PostSchema) => void;
   onTemplateChange: (style: TemplateStyle) => void;
   onOpenAIGenerator?: () => void;
+  onPublishClick?: () => void;
+  isPublishing?: boolean;
 }
 
 export const ContentEditor: React.FC<ContentEditorProps> = ({
@@ -35,6 +38,8 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
   onPostChange,
   onTemplateChange,
   onOpenAIGenerator,
+  onPublishClick,
+  isPublishing = false,
 }) => {
   const [newTakeaway, setNewTakeaway] = useState('');
   const [newButtonText, setNewButtonText] = useState('');
@@ -169,25 +174,26 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5 w-full">
-      {/* Quick AI Generator Banner for Mobile / Fast Entry */}
+      {/* 1-Click Smart Auto-Fill & Magic Ingest Bar */}
+      <SmartAutoFillBar
+        onPostGenerated={(newPost) => {
+          onPostChange(() => newPost);
+        }}
+        onPublishClick={onPublishClick}
+        isPublishing={isPublishing}
+      />
+
+      {/* Optional link to Full AI Generator Modal */}
       {onOpenAIGenerator && (
-        <div className="flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-cyan-950/50 via-blue-950/40 to-slate-900/60 border border-cyan-500/30 shadow-md">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-cyan-900/70 border border-cyan-500/40 flex items-center justify-center text-cyan-300 shadow-inner">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-white tracking-wide">Generate with AI</h4>
-              <p className="text-[10px] text-slate-400">Paste URL, article, or rough idea</p>
-            </div>
-          </div>
-          <Button
-            size="sm"
+        <div className="flex justify-end px-1 -mt-2">
+          <button
+            type="button"
             onClick={onOpenAIGenerator}
-            className="h-8 px-3 text-xs font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-md shadow-cyan-950/50 rounded-xl"
+            className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
           >
-            ✨ Start
-          </Button>
+            <Sparkles className="w-3 h-3 text-cyan-400" />
+            <span>Need alternate headline hooks or visual concepts? Open AI Dialog →</span>
+          </button>
         </div>
       )}
 

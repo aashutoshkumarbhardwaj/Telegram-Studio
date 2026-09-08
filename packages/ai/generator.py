@@ -445,6 +445,7 @@ async def generate_post_from_input(
     raw_input: str,
     category_override: str = "auto",
     notes: str = "",
+    link: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Master pipeline:
@@ -457,9 +458,14 @@ async def generate_post_from_input(
     """
     clean_input = raw_input.strip()
     if not clean_input:
-        raise ValueError("Input cannot be empty. Please provide a URL, text, or topic idea.")
+        if link and link.strip():
+            clean_input = link.strip()
+        else:
+            raise ValueError("Input cannot be empty. Please provide a URL, text, or topic idea.")
 
     urls = extract_urls(clean_input)
+    if link and link.strip() and link.strip() not in urls:
+        urls.insert(0, link.strip())
     has_url = len(urls) > 0
     primary_url = urls[0] if has_url else None
 

@@ -4,6 +4,7 @@ export interface GenerateRequest {
   input: string;
   category?: ContentType | 'auto';
   notes?: string;
+  link?: string;
 }
 
 export interface HookOption {

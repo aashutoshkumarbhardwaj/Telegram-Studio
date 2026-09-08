@@ -415,7 +415,8 @@ async def generate_post_endpoint(request: web.Request) -> web.Response:
     try:
         body = await request.json()
         raw_input = body.get("input", "").strip()
-        if not raw_input:
+        link = body.get("link", "").strip() or body.get("url", "").strip()
+        if not raw_input and not link:
             return web.json_response({
                 "success": False,
                 "error": "Input cannot be empty. Please enter a URL, article, or idea."
@@ -428,6 +429,7 @@ async def generate_post_endpoint(request: web.Request) -> web.Response:
             raw_input=raw_input,
             category_override=category,
             notes=notes,
+            link=link or None,
         )
 
         post: PostSchema = result["post"]

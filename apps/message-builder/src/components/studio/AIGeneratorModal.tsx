@@ -29,16 +29,19 @@ import {
   SlidersHorizontal,
   ChevronDown,
   ChevronUp,
+  Send,
 } from 'lucide-react';
 import { ContentType, PostSchema } from '@/types/postSchema';
 import { GenerateResponse, HookOption, QualityScores } from '@/types/generator';
 import { generatePostFromInput } from '@/lib/api';
+import { extractUrls } from '@/lib/smartExtractor';
 import { toast } from 'sonner';
 
 interface AIGeneratorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPostGenerated: (post: PostSchema, draftId: number, quality?: QualityScores, hooks?: HookOption[]) => void;
+  onPublishClick?: () => void;
 }
 
 const GENERATION_STAGES = [
@@ -52,8 +55,10 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
   isOpen,
   onClose,
   onPostGenerated,
+  onPublishClick,
 }) => {
   const [inputVal, setInputVal] = useState('');
+  const [linkVal, setLinkVal] = useState('');
   const [category, setCategory] = useState<ContentType | 'auto'>('auto');
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
@@ -73,8 +78,17 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
       setErrorMessage(null);
       setIsUrlError(false);
       setStageIndex(0);
+      setLinkVal('');
     }
   }, [isOpen]);
+
+  // Auto-detect URL from input
+  useEffect(() => {
+    const urls = extractUrls(inputVal);
+    if (urls.length > 0 && !linkVal) {
+      setLinkVal(urls[0]);
+    }
+  }, [inputVal, linkVal]);
 
   // Stage simulation while async call runs
   useEffect(() => {
@@ -89,7 +103,8 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
 
   const handleGenerate = async () => {
     const trimmed = inputVal.trim();
-    if (!trimmed) {
+    const trimmedLink = linkVal.trim();
+    if (!trimmed && !trimmedLink) {
       setErrorMessage('Please enter a URL, article text, or rough idea.');
       return;
     }
@@ -102,9 +117,10 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
 
     try {
       const res = await generatePostFromInput({
-        input: trimmed,
+        input: trimmed || trimmedLink,
         category: category === 'auto' ? undefined : category,
         notes: notes.trim() || undefined,
+        link: trimmedLink || undefined,
       });
 
       if (res.success && res.post && res.draft_id) {
@@ -148,8 +164,23 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
     onClose();
   };
 
+  const handlePublishDirectly = () => {
+    if (!genResult || !genResult.post || !genResult.draft_id) return;
+    onPostGenerated(
+      genResult.post,
+      genResult.draft_id,
+      genResult.quality,
+      genResult.generation?.hooks
+    );
+    onClose();
+    if (onPublishClick) {
+      onPublishClick();
+    }
+  };
+
   const handlePasteTextFallback = () => {
     setInputVal('');
+    setLinkVal('');
     setIsUrlError(false);
     setErrorMessage(null);
   };
@@ -216,10 +247,28 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
                   setInputVal(e.target.value);
                   setErrorMessage(null);
                 }}
-                rows={5}
+                rows={4}
                 disabled={isGenerating}
                 className="bg-slate-900/80 border-slate-700/80 text-white placeholder:text-slate-500 text-sm sm:text-xs focus-visible:ring-cyan-500 resize-none font-sans leading-relaxed"
                 autoFocus
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="ai-link" className="text-xs font-medium text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <LinkIcon className="w-3 h-3 text-cyan-400" />
+                  <span>Source URL / Link (Optional)</span>
+                </span>
+                <span className="text-[10px] text-slate-500">Auto-extracted or paste manually</span>
+              </Label>
+              <Input
+                id="ai-link"
+                placeholder="https://... (e.g. original article, job posting, repo link)"
+                value={linkVal}
+                onChange={(e) => setLinkVal(e.target.value)}
+                disabled={isGenerating}
+                className="h-8 text-xs bg-slate-900/80 border-slate-700/80 text-white placeholder:text-slate-500 font-mono"
               />
             </div>
 
@@ -425,17 +474,18 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={onClose}
+                  onClick={handleOpenInEditor}
                   className="flex-1 sm:flex-initial h-11 sm:h-8 text-xs border-slate-700 text-slate-300 hover:bg-slate-800"
                 >
-                  Close
+                  Open in Editor →
                 </Button>
                 <Button
                   size="sm"
-                  onClick={handleOpenInEditor}
-                  className="flex-1 sm:flex-initial h-11 sm:h-8 text-sm sm:text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
+                  onClick={handlePublishDirectly}
+                  className="flex-1 sm:flex-initial h-11 sm:h-8 text-sm sm:text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md shadow-cyan-950"
                 >
-                  Open in Editor →
+                  <Send className="w-3.5 h-3.5 mr-1" />
+                  Publish Now
                 </Button>
               </div>
             </div>

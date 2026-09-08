@@ -376,6 +376,8 @@ export const StudioLayout: React.FC = () => {
                 onPostChange={handlePostChange}
                 onTemplateChange={setTemplateStyle}
                 onOpenAIGenerator={() => setIsAIGenOpen(true)}
+                onPublishClick={() => setIsPublishModalOpen(true)}
+                isPublishing={isPublishing}
               />
             </div>
           </ResizablePanel>
@@ -417,6 +419,8 @@ export const StudioLayout: React.FC = () => {
                 onPostChange={handlePostChange}
                 onTemplateChange={setTemplateStyle}
                 onOpenAIGenerator={() => setIsAIGenOpen(true)}
+                onPublishClick={() => setIsPublishModalOpen(true)}
+                isPublishing={isPublishing}
               />
             </div>
           )}
@@ -571,6 +575,7 @@ export const StudioLayout: React.FC = () => {
         isOpen={isAIGenOpen}
         onClose={() => setIsAIGenOpen(false)}
         onPostGenerated={handlePostGenerated}
+        onPublishClick={() => setIsPublishModalOpen(true)}
       />
     </div>
   );
