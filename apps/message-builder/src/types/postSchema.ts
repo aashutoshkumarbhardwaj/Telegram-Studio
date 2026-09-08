@@ -26,7 +26,7 @@ export interface MediaItem {
 
 export interface InlineButton {
   text: string;
-  url: string;
+  url?: string;
   callback_data?: string;
   row?: number;
 }

@@ -283,6 +283,17 @@ async def get_draft_by_id(request: web.Request) -> web.Response:
     }, headers=cors)
 
 
+def format_validation_error(e: ValidationError) -> str:
+    """Formats Pydantic validation error into a clear, readable message."""
+    err_msgs = []
+    for err in e.errors():
+        loc = ".".join(str(l) for l in err.get("loc", []))
+        msg = err.get("msg", "Validation error")
+        err_msgs.append(f"{loc}: {msg}" if loc else msg)
+    detail_str = "; ".join(err_msgs)
+    return f"Schema validation failed: {detail_str}" if detail_str else "Schema validation failed"
+
+
 async def create_draft(request: web.Request) -> web.Response:
     """POST /api/drafts — Validates canonical PostSchema and creates draft in DB."""
     db: StudioDatabase = request.app["db"]
@@ -300,7 +311,9 @@ async def create_draft(request: web.Request) -> web.Response:
             "schema": post.model_dump(),
         }, status=201, headers=cors)
     except ValidationError as e:
-        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+        err_msg = format_validation_error(e)
+        logger.warning(f"Create draft schema validation failed: {err_msg}")
+        return web.json_response({"success": False, "error": err_msg, "details": e.errors()}, status=400, headers=cors)
     except Exception as e:
         logger.error(f"Failed to create draft: {e}", exc_info=True)
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
@@ -326,7 +339,9 @@ async def update_draft(request: web.Request) -> web.Response:
             "schema": post.model_dump(),
         }, headers=cors)
     except ValidationError as e:
-        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+        err_msg = format_validation_error(e)
+        logger.warning(f"Update draft schema validation failed: {err_msg}")
+        return web.json_response({"success": False, "error": err_msg, "details": e.errors()}, status=400, headers=cors)
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
 
@@ -367,7 +382,9 @@ async def generate_preview(request: web.Request) -> web.Response:
             "payload": payload,
         }, headers=cors)
     except ValidationError as e:
-        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+        err_msg = format_validation_error(e)
+        logger.warning(f"Preview schema validation failed: {err_msg}")
+        return web.json_response({"success": False, "error": err_msg, "details": e.errors()}, status=400, headers=cors)
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
 
@@ -402,7 +419,9 @@ async def publish_post_endpoint(request: web.Request) -> web.Response:
             "publish_result": res,
         }, headers=cors)
     except ValidationError as e:
-        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+        err_msg = format_validation_error(e)
+        logger.warning(f"Publish schema validation failed: {err_msg}")
+        return web.json_response({"success": False, "error": err_msg, "details": e.errors()}, status=400, headers=cors)
     except Exception as e:
         logger.error(f"Publish failed: {e}", exc_info=True)
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
@@ -568,7 +587,9 @@ async def schedule_post_endpoint(request: web.Request) -> web.Response:
             "scheduled_post": scheduled_record,
         }, status=200, headers=cors)
     except ValidationError as e:
-        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+        err_msg = format_validation_error(e)
+        logger.warning(f"Schedule schema validation failed: {err_msg}")
+        return web.json_response({"success": False, "error": err_msg, "details": e.errors()}, status=400, headers=cors)
     except Exception as e:
         logger.error(f"Scheduling failed: {e}", exc_info=True)
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
@@ -645,7 +666,9 @@ async def update_scheduled_post_endpoint(request: web.Request) -> web.Response:
     except ValueError as val_err:
         return web.json_response({"success": False, "error": str(val_err)}, status=400, headers=cors)
     except ValidationError as e:
-        return web.json_response({"success": False, "error": "Schema validation failed", "details": e.errors()}, status=400, headers=cors)
+        err_msg = format_validation_error(e)
+        logger.warning(f"Update scheduled post schema validation failed: {err_msg}")
+        return web.json_response({"success": False, "error": err_msg, "details": e.errors()}, status=400, headers=cors)
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers=cors)
 

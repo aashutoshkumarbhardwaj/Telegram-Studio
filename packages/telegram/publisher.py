@@ -24,17 +24,19 @@ from packages.formatter.telegram_formatter import is_valid_button_url
 def build_aiogram_inline_keyboard(post: PostSchema, max_per_row: int = 2) -> Optional[InlineKeyboardMarkup]:
     """
     Constructs an aiogram InlineKeyboardMarkup instance from a PostSchema object.
-    Filters out invalid/dummy URLs.
+    Supports both URL buttons and callback_data buttons.
     """
-    valid_buttons = [b for b in post.buttons if is_valid_button_url(b.url)]
-    if not valid_buttons:
-        return None
-        
     rows = []
     current_row = []
     
-    for btn in valid_buttons:
-        current_row.append(InlineKeyboardButton(text=btn.text, url=btn.url))
+    for btn in post.buttons:
+        if btn.callback_data and btn.callback_data.strip():
+            current_row.append(InlineKeyboardButton(text=btn.text, callback_data=btn.callback_data.strip()))
+        elif btn.url and is_valid_button_url(btn.url):
+            current_row.append(InlineKeyboardButton(text=btn.text, url=btn.url.strip()))
+        else:
+            continue
+            
         if len(current_row) >= max_per_row:
             rows.append(current_row)
             current_row = []
@@ -42,7 +44,7 @@ def build_aiogram_inline_keyboard(post: PostSchema, max_per_row: int = 2) -> Opt
     if current_row:
         rows.append(current_row)
         
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
 async def publish_post_to_telegram(

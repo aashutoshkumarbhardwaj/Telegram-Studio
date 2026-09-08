@@ -62,3 +62,45 @@ def test_post_schema_invalid_content_type():
             title="Invalid",
             body="Invalid",
         )
+
+
+def test_post_schema_callback_button_and_github_type():
+    post = PostSchema(
+        content_type=ContentType.GITHUB,
+        title="Awesome AI Studio",
+        body="Comprehensive open source Telegram studio for AI developers.",
+        buttons=[
+            InlineButton(text="GitHub Repo", url="https://github.com/heyaaashu/studio"),
+            InlineButton(text="❤️ Like", callback_data="react_like"),
+        ],
+    )
+    assert post.content_type == ContentType.GITHUB
+    assert len(post.buttons) == 2
+    assert post.buttons[0].url == "https://github.com/heyaaashu/studio"
+    assert post.buttons[1].callback_data == "react_like"
+    assert post.buttons[1].url is None
+
+
+def test_build_aiogram_inline_keyboard():
+    from packages.telegram.publisher import build_aiogram_inline_keyboard
+
+    post = PostSchema(
+        content_type=ContentType.AI_TOOL,
+        title="Tool Spotlight",
+        body="Check out this tool.",
+        buttons=[
+            InlineButton(text="Visit", url="https://tool.ai"),
+            InlineButton(text="❤️ Like", callback_data="react_like"),
+            InlineButton(text="Invalid Dummy", url=""),  # Should be safely skipped
+        ],
+    )
+    kb = build_aiogram_inline_keyboard(post)
+    assert kb is not None
+    assert len(kb.inline_keyboard) >= 1
+    flat_btns = [btn for row in kb.inline_keyboard for btn in row]
+    assert len(flat_btns) == 2
+    assert flat_btns[0].text == "Visit"
+    assert flat_btns[0].url == "https://tool.ai"
+    assert flat_btns[1].text == "❤️ Like"
+    assert flat_btns[1].callback_data == "react_like"
+

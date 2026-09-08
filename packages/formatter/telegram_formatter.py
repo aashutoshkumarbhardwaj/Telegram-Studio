@@ -23,6 +23,7 @@ CONTENT_HEADERS: Dict[ContentType, str] = {
     ContentType.INTERNSHIP: "🎓 <b>INTERNSHIP ALERT</b>",
     ContentType.HACKATHON: "🏆 <b>HACKATHON</b>",
     ContentType.AI_TOOL: "🛠 <b>AI TOOL</b>",
+    ContentType.GITHUB: "💻 <b>GITHUB</b>",
     ContentType.CAREER: "🧠 <b>CAREER</b>",
     ContentType.RESOURCE: "📚 <b>RESOURCE</b>",
 }
@@ -33,6 +34,7 @@ CONTENT_HEADERS_MD2: Dict[ContentType, str] = {
     ContentType.INTERNSHIP: "🎓 *INTERNSHIP ALERT*",
     ContentType.HACKATHON: "🏆 *HACKATHON*",
     ContentType.AI_TOOL: "🛠 *AI TOOL*",
+    ContentType.GITHUB: "💻 *GITHUB*",
     ContentType.CAREER: "🧠 *CAREER*",
     ContentType.RESOURCE: "📚 *RESOURCE*",
 }
@@ -125,9 +127,11 @@ def format_post_text(post: PostSchema, include_header: bool = True) -> str:
 
 def is_valid_button_url(url: Optional[str]) -> bool:
     """Validates that a URL is well-formed for Telegram inline keyboard buttons."""
-    if not url:
+    if not url or not isinstance(url, str):
         return False
     clean = url.strip()
+    if not clean:
+        return False
     if clean.startswith(("tg://", "t.me/")):
         return True
     return bool(re.match(r"^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$", clean, re.IGNORECASE))
@@ -136,17 +140,19 @@ def is_valid_button_url(url: Optional[str]) -> bool:
 def build_inline_keyboard(post: PostSchema, max_per_row: int = 2) -> Optional[Dict[str, Any]]:
     """
     Constructs Telegram inline keyboard markup from PostSchema buttons.
-    Filters out invalid buttons with missing or malformed URLs.
+    Supports both URL buttons and callback_data buttons.
     """
-    valid_buttons = [b for b in post.buttons if is_valid_button_url(b.url)]
-    if not valid_buttons:
-        return None
-
     rows = []
     current_row = []
 
-    for btn in valid_buttons:
-        current_row.append({"text": btn.text, "url": btn.url})
+    for btn in post.buttons:
+        if btn.callback_data and btn.callback_data.strip():
+            current_row.append({"text": btn.text, "callback_data": btn.callback_data.strip()})
+        elif btn.url and is_valid_button_url(btn.url):
+            current_row.append({"text": btn.text, "url": btn.url.strip()})
+        else:
+            continue
+
         if len(current_row) >= max_per_row:
             rows.append(current_row)
             current_row = []
@@ -154,7 +160,7 @@ def build_inline_keyboard(post: PostSchema, max_per_row: int = 2) -> Optional[Di
     if current_row:
         rows.append(current_row)
 
-    return {"inline_keyboard": rows}
+    return {"inline_keyboard": rows} if rows else None
 
 
 def validate_telegram_constraints(text: str, has_media: bool = False) -> Tuple[bool, Optional[str]]:

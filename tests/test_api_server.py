@@ -190,5 +190,20 @@ async def test_publish_endpoint_validation_and_response(tmp_path):
         assert pub_data["success"] is True
         assert "message_id" in pub_data
         assert "channel_id" in pub_data
+
+        # Valid github post with callback action button (like button)
+        github_post = {
+            "content_type": "github",
+            "title": "Telegram AI Studio Released",
+            "body": "Open source studio for publishing to Telegram.",
+            "buttons": [
+                {"text": "GitHub", "url": "https://github.com/heyaaashu"},
+                {"text": "❤️ Like", "callback_data": "react_like"},
+            ],
+        }
+        gh_resp = await client.post("/api/publish", json={"schema": github_post})
+        assert gh_resp.status == 200
+        gh_data = await gh_resp.json()
+        assert gh_data["success"] is True
     finally:
         await client.close()
