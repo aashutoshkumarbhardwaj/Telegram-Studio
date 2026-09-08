@@ -22,6 +22,9 @@ import {
   SlidersHorizontal,
   Layers,
   Eye,
+  Edit3,
+  Check,
+  Heart,
 } from 'lucide-react';
 import { generatePostFromInput } from '@/lib/api';
 import { extractUrls, buildButtons } from '@/lib/smartExtractor';
@@ -52,10 +55,14 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
   const [activeTab, setActiveTab] = useState<'content' | 'link'>('content');
   const [rawText, setRawText] = useState('');
   const [explicitLink, setExplicitLink] = useState('');
+  const [isLinkRemoved, setIsLinkRemoved] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [lastAutoFilledTitle, setLastAutoFilledTitle] = useState<string | null>(null);
 
   const [isCategoryManual, setIsCategoryManual] = useState(false);
+  const [isPreviewEditing, setIsPreviewEditing] = useState(false);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
 
   // Custom button adder state
   const [isAddingButton, setIsAddingButton] = useState(false);
@@ -65,20 +72,73 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
   // Optional fine-tune text drawer
   const [showFineTune, setShowFineTune] = useState(false);
 
-  // Auto-extract link from raw text if user hasn't explicitly set one
+  const handleRemoveLink = () => {
+    setExplicitLink('');
+    setIsLinkRemoved(true);
+    onPostChange((prev) => {
+      const remainingButtons = (prev.buttons || []).filter((btn) => {
+        return btn.callback_data === 'react_like' || btn.text.includes('Discuss') || !btn.url;
+      });
+      return {
+        ...prev,
+        source: undefined,
+        buttons: remainingButtons,
+      };
+    });
+    toast.info('Source link removed');
+  };
+
+  const handleLinkChange = (val: string) => {
+    setExplicitLink(val);
+    if (!val.trim()) {
+      handleRemoveLink();
+    } else {
+      setIsLinkRemoved(false);
+      const cleanUrl = val.trim();
+      onPostChange((prev) => {
+        const updatedButtons = [...(prev.buttons || [])];
+        const resourceBtnIdx = updatedButtons.findIndex(
+          (b) => b.url && !b.text.includes('Discuss') && b.callback_data !== 'react_like'
+        );
+        let label = '📚 Read Source';
+        if (prev.content_type === 'job') label = '💼 Apply Now';
+        else if (prev.content_type === 'internship') label = '🎓 Apply for Internship';
+        else if (prev.content_type === 'hackathon') label = '🏆 Register Now';
+        else if (prev.content_type === 'ai_tool') label = '🛠 Try Tool';
+        else if (prev.content_type === 'github') label = '💻 View on GitHub';
+        else if (prev.content_type === 'resource') label = '📖 Access Resource';
+        else if (prev.content_type === 'career') label = '🚀 Read Guide';
+
+        if (resourceBtnIdx >= 0) {
+          updatedButtons[resourceBtnIdx] = { ...updatedButtons[resourceBtnIdx], url: cleanUrl };
+        } else {
+          updatedButtons.unshift({ text: label, url: cleanUrl });
+        }
+
+        return {
+          ...prev,
+          source: { title: 'Official Source', url: cleanUrl },
+          buttons: updatedButtons,
+        };
+      });
+    }
+  };
+
+  // Auto-extract link from raw text if user hasn't explicitly set or removed one
   useEffect(() => {
+    if (isLinkRemoved) return;
     const urls = extractUrls(rawText);
     if (urls.length > 0 && !explicitLink) {
       setExplicitLink(urls[0]);
     }
-  }, [rawText, explicitLink]);
+  }, [rawText, explicitLink, isLinkRemoved]);
 
   // Sync explicitLink if post already has a source URL
   useEffect(() => {
-    if (post.source?.url && !explicitLink) {
+    if (post.source?.url && !explicitLink && !isLinkRemoved) {
       setExplicitLink(post.source.url);
     }
-  }, [post.source?.url, explicitLink]);
+  }, [post.source?.url, explicitLink, isLinkRemoved]);
 
   const handlePasteClipboard = async () => {
     try {
@@ -325,15 +385,28 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
             </div>
 
             {/* Compact Link Row */}
-            <div className="flex items-center gap-1.5 bg-slate-950/60 border border-slate-800/80 rounded-xl px-2.5 py-1 mt-0.5">
-              <LinkIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <input
-                type="text"
-                value={explicitLink}
-                onChange={(e) => setExplicitLink(e.target.value)}
-                placeholder="Source Link (Optional — auto-detected if included in text)"
-                className="bg-transparent border-none text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none w-full font-mono"
-              />
+            <div className="flex items-center justify-between gap-1.5 bg-slate-950/60 border border-slate-800/80 rounded-xl px-2.5 py-1 mt-0.5">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <LinkIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <input
+                  type="text"
+                  value={explicitLink}
+                  onChange={(e) => handleLinkChange(e.target.value)}
+                  placeholder="Source Link (Optional — auto-detected if included in text)"
+                  className="bg-transparent border-none text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none w-full font-mono"
+                />
+              </div>
+              {explicitLink && (
+                <button
+                  type="button"
+                  onClick={handleRemoveLink}
+                  className="text-slate-400 hover:text-rose-400 p-0.5 rounded transition-colors text-[10px] flex items-center gap-0.5 shrink-0"
+                  title="Remove source link"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Remove</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -346,14 +419,35 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
                 <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
                 Source URL / Action Link
               </span>
-              <span className="text-[10px] text-slate-500">Auto-wired into buttons</span>
+              {explicitLink && (
+                <button
+                  type="button"
+                  onClick={handleRemoveLink}
+                  className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 font-medium transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Remove Link</span>
+                </button>
+              )}
             </div>
-            <Input
-              value={explicitLink}
-              onChange={(e) => setExplicitLink(e.target.value)}
-              placeholder="https://... (e.g. original article, job posting, repo link)"
-              className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-lg font-mono"
-            />
+            <div className="relative flex items-center">
+              <Input
+                value={explicitLink}
+                onChange={(e) => handleLinkChange(e.target.value)}
+                placeholder="https://... (e.g. original article, job posting, repo link)"
+                className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-lg font-mono pr-8"
+              />
+              {explicitLink && (
+                <button
+                  type="button"
+                  onClick={handleRemoveLink}
+                  className="absolute right-2 text-slate-400 hover:text-rose-400 p-0.5 rounded"
+                  title="Clear link"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
             <p className="text-[10px] text-slate-400 leading-tight">
               💡 If you copied content without links, enter the link here. It will automatically become the primary source and the Telegram action button.
             </p>
@@ -549,7 +643,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
 
       {/* ─── 2. LIVE INLINE TELEGRAM MESSAGE PREVIEW CARD ───────────────── */}
       <div className="flex flex-col gap-2.5 p-3 sm:p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800/90 backdrop-blur-xl shadow-lg">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
@@ -560,16 +654,40 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
               {post.content_type.replace('_', ' ')}
             </span>
           </div>
-          {onViewPreview && (
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={onViewPreview}
-              className="text-[11px] text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 transition-colors"
+              onClick={() => setIsPreviewEditing(!isPreviewEditing)}
+              className={`text-[11px] px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1.5 transition-all shadow-sm ${
+                isPreviewEditing
+                  ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200 shadow-cyan-950/50'
+                  : 'bg-slate-900 border-slate-700/80 text-slate-300 hover:text-white hover:border-cyan-500/50'
+              }`}
+              title={isPreviewEditing ? 'Finish editing' : 'Click to edit post text directly in preview'}
             >
-              <span>Full View</span>
-              <ExternalLink className="w-3 h-3" />
+              {isPreviewEditing ? (
+                <>
+                  <Check className="w-3 h-3 text-cyan-300" />
+                  <span>Done</span>
+                </>
+              ) : (
+                <>
+                  <Edit3 className="w-3 h-3 text-cyan-400" />
+                  <span>Edit in Preview</span>
+                </>
+              )}
             </button>
-          )}
+            {onViewPreview && (
+              <button
+                type="button"
+                onClick={onViewPreview}
+                className="text-[11px] text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 transition-colors pl-1"
+              >
+                <span>Full View</span>
+                <ExternalLink className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Telegram Chat Bubble */}
@@ -588,11 +706,59 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
             </div>
           )}
 
-          {/* Formatted HTML Message Body */}
-          <div
-            className="text-xs sm:text-[12.5px] leading-relaxed whitespace-pre-wrap select-text text-slate-100/95"
-            dangerouslySetInnerHTML={{ __html: formatPostHtml(post, templateStyle) }}
-          />
+          {/* In-Preview Edit Mode vs Rendered View */}
+          {isPreviewEditing ? (
+            <div className="flex flex-col gap-2.5 p-1 animate-in fade-in duration-150">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
+                  Headline
+                </label>
+                <input
+                  type="text"
+                  value={post.title}
+                  onChange={(e) => onPostChange((prev) => ({ ...prev, title: e.target.value }))}
+                  placeholder="Post Headline..."
+                  className="h-8 text-xs bg-slate-900/90 border border-cyan-500/50 text-white font-semibold rounded-lg px-2.5 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>Message Content (Preserves formatting & links)</span>
+                  <span className="text-[9px] text-slate-400 font-normal">Supports &lt;b&gt;, &lt;a href="..."&gt;</span>
+                </label>
+                <textarea
+                  value={post.body}
+                  onChange={(e) => onPostChange((prev) => ({ ...prev, body: e.target.value, summary: e.target.value }))}
+                  rows={9}
+                  placeholder="Write or edit post content..."
+                  className="w-full text-xs leading-relaxed bg-slate-900/90 border border-cyan-500/50 text-slate-100 p-2.5 resize-y font-sans rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                />
+              </div>
+              <div className="flex justify-end pt-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setIsPreviewEditing(false)}
+                  className="h-7 text-xs px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg shadow-sm"
+                >
+                  <Check className="w-3.5 h-3.5 mr-1" />
+                  Done Editing
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div
+              onClick={() => setIsPreviewEditing(true)}
+              title="Click to edit post text in preview"
+              className="text-xs sm:text-[12.5px] leading-relaxed whitespace-pre-wrap select-text text-slate-100/95 cursor-pointer hover:bg-white/[0.02] p-1 rounded-lg transition-colors group relative"
+            >
+              <div dangerouslySetInnerHTML={{ __html: formatPostHtml(post, templateStyle) }} />
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute top-1 right-1 bg-slate-900/90 border border-slate-700 text-slate-300 text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm">
+                <Edit3 className="w-2.5 h-2.5 text-cyan-400" />
+                <span>Click to edit</span>
+              </div>
+            </div>
+          )}
 
           {/* Inline Buttons */}
           {activeButtons.length > 0 && (
@@ -604,18 +770,45 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
                 }
                 return rows.map((row, rIdx) => (
                   <div key={rIdx} className="flex items-center gap-1.5 w-full">
-                    {row.map((btn, bIdx) => (
-                      <a
-                        key={bIdx}
-                        href={btn.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex-1 bg-[#2b3e55]/80 hover:bg-[#344c68] active:bg-[#3d597a] border border-[#3b526f]/60 text-white rounded-lg py-1.5 px-2 text-center text-[11px] font-medium flex items-center justify-center gap-1 transition-colors truncate"
-                      >
-                        <span className="truncate">{btn.text}</span>
-                        <ExternalLink className="w-2.5 h-2.5 text-cyan-400/70 shrink-0" />
-                      </a>
-                    ))}
+                    {row.map((btn, bIdx) => {
+                      const isLike = btn.callback_data === 'react_like' || btn.text.includes('❤️') || btn.text.toLowerCase().includes('like');
+                      if (isLike || (!btn.url && btn.callback_data)) {
+                        return (
+                          <button
+                            key={bIdx}
+                            type="button"
+                            onClick={() => {
+                              setIsLiked(!isLiked);
+                              setLikeCount((prev) => (isLiked ? prev - 1 : prev + 1));
+                              if (!isLiked) {
+                                toast.success('❤️ Liked! Telegram reaction recorded.');
+                              }
+                            }}
+                            className={`flex-1 border rounded-lg py-1.5 px-2 text-center text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 ${
+                              isLiked
+                                ? 'bg-rose-500/20 border-rose-500/60 text-rose-300 shadow-rose-950/40'
+                                : 'bg-[#2b3e55]/80 hover:bg-[#344c68] border-[#3b526f]/60 text-white'
+                            }`}
+                            title="Interactive like reaction"
+                          >
+                            <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-rose-400 text-rose-400 animate-bounce' : 'text-rose-400'}`} />
+                            <span className="truncate">{isLiked ? `❤️ Liked (${Math.max(1, likeCount + 1)})` : btn.text}</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <a
+                          key={bIdx}
+                          href={btn.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 bg-[#2b3e55]/80 hover:bg-[#344c68] active:bg-[#3d597a] border border-[#3b526f]/60 text-white rounded-lg py-1.5 px-2 text-center text-[11px] font-medium flex items-center justify-center gap-1 transition-colors truncate"
+                        >
+                          <span className="truncate">{btn.text}</span>
+                          <ExternalLink className="w-2.5 h-2.5 text-cyan-400/70 shrink-0" />
+                        </a>
+                      );
+                    })}
                   </div>
                 ));
               })()}

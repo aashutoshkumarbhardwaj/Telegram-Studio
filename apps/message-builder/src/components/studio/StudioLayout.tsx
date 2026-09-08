@@ -388,7 +388,11 @@ export const StudioLayout: React.FC = () => {
           {/* Center Canvas: Live Telegram Preview */}
           <ResizablePanel defaultSize={44} minSize={30} className="bg-transparent flex flex-col">
             <div className="flex-1 overflow-y-auto p-4 flex items-center justify-center">
-              <TelegramPreview post={post} templateStyle={templateStyle} />
+              <TelegramPreview
+                post={post}
+                templateStyle={templateStyle}
+                onPostChange={handlePostChange}
+              />
             </div>
           </ResizablePanel>
 
@@ -432,6 +436,7 @@ export const StudioLayout: React.FC = () => {
               <TelegramPreview
                 post={post}
                 templateStyle={templateStyle}
+                onPostChange={handlePostChange}
                 onPublishClick={() => setIsPublishModalOpen(true)}
               />
             </div>

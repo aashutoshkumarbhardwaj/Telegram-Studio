@@ -603,10 +603,24 @@ async def generate_post_from_input(
     # Buttons
     buttons: List[InlineButton] = []
     if primary_url:
-        button_label = "📚 Read Source" if category == ContentType.AI_NEWS else "🔗 Open Details"
+        if category == ContentType.JOB:
+            button_label = "💼 Apply Now"
+        elif category == ContentType.INTERNSHIP:
+            button_label = "🎓 Apply for Internship"
+        elif category == ContentType.HACKATHON:
+            button_label = "🏆 Register Now"
+        elif category == ContentType.AI_TOOL:
+            button_label = "🛠 Try Tool"
+        elif category == ContentType.CAREER:
+            button_label = "🚀 Read Guide"
+        elif category == ContentType.RESOURCE:
+            button_label = "📖 Access Resource"
+        else:
+            button_label = "📚 Read Source"
         buttons.append(InlineButton(text=button_label, url=primary_url))
-    like_url = f"{primary_url.split('#')[0]}#like" if primary_url else "https://t.me/heyaaashu"
-    buttons.append(InlineButton(text="❤️ Like", url=like_url, callback_data="react_like"))
+
+    # Real callback-based like button (no dummy url)
+    buttons.append(InlineButton(text="❤️ Like", callback_data="react_like"))
     buttons.append(InlineButton(text="💬 Discuss", url="https://t.me/heyaaashu"))
 
     # Source Info

@@ -1,20 +1,27 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PostSchema } from '@/types/postSchema';
 import { TemplateStyle, formatPostHtml } from '@/lib/templates';
 import { Button } from '@/components/ui/button';
-import { ExternalLink, CheckCheck, Eye, Send } from 'lucide-react';
+import { ExternalLink, CheckCheck, Eye, Send, Edit3, Check, Heart } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface TelegramPreviewProps {
   post: PostSchema;
   templateStyle: TemplateStyle;
+  onPostChange?: (updater: (prev: PostSchema) => PostSchema) => void;
   onPublishClick?: () => void;
 }
 
 export const TelegramPreview: React.FC<TelegramPreviewProps> = ({
   post,
   templateStyle,
+  onPostChange,
   onPublishClick,
 }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+
   const formattedHtml = formatPostHtml(post, templateStyle);
   const media = post.media && post.media.length > 0 ? post.media[0] : null;
 
@@ -47,9 +54,35 @@ export const TelegramPreview: React.FC<TelegramPreviewProps> = ({
               <p className="text-[10px] text-slate-400">14,820 subscribers</p>
             </div>
           </div>
-          <span className="text-[11px] text-cyan-400 font-medium bg-cyan-950/70 border border-cyan-800/50 rounded-full px-2.5 py-0.5">
-            Channel Preview
-          </span>
+          <div className="flex items-center gap-2">
+            {onPostChange && (
+              <button
+                type="button"
+                onClick={() => setIsEditing(!isEditing)}
+                className={`text-[11px] font-medium px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 ${
+                  isEditing
+                    ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                    : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                }`}
+                title={isEditing ? 'Finish editing' : 'Edit post text in preview'}
+              >
+                {isEditing ? (
+                  <>
+                    <Check className="w-3 h-3 text-cyan-300" />
+                    <span>Done</span>
+                  </>
+                ) : (
+                  <>
+                    <Edit3 className="w-3 h-3 text-cyan-400" />
+                    <span>Edit Post</span>
+                  </>
+                )}
+              </button>
+            )}
+            <span className="text-[11px] text-cyan-400 font-medium bg-cyan-950/70 border border-cyan-800/50 rounded-full px-2.5 py-0.5">
+              Preview
+            </span>
+          </div>
         </div>
 
         {/* Telegram Chat Canvas */}
@@ -70,29 +103,108 @@ export const TelegramPreview: React.FC<TelegramPreviewProps> = ({
               </div>
             )}
 
-            {/* Post Message Body */}
-            <div
-              className="text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap select-text text-slate-100/95 font-normal"
-              dangerouslySetInnerHTML={{ __html: formattedHtml }}
-            />
+            {/* In-Preview Editor vs Formatted View */}
+            {isEditing && onPostChange ? (
+              <div className="flex flex-col gap-2.5 p-1 animate-in fade-in duration-150">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
+                    Headline
+                  </label>
+                  <input
+                    type="text"
+                    value={post.title}
+                    onChange={(e) => onPostChange((prev) => ({ ...prev, title: e.target.value }))}
+                    placeholder="Post Headline..."
+                    className="h-8 text-xs bg-slate-900/90 border border-cyan-500/50 text-white font-semibold rounded-lg px-2.5 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Message Content</span>
+                    <span className="text-[9px] text-slate-400 font-normal">Supports &lt;b&gt;, &lt;a href="..."&gt;</span>
+                  </label>
+                  <textarea
+                    value={post.body}
+                    onChange={(e) => onPostChange((prev) => ({ ...prev, body: e.target.value, summary: e.target.value }))}
+                    rows={10}
+                    placeholder="Write or edit post content..."
+                    className="w-full text-xs leading-relaxed bg-slate-900/90 border border-cyan-500/50 text-slate-100 p-2.5 resize-y font-sans rounded-lg focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                  />
+                </div>
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setIsEditing(false)}
+                    className="h-7 text-xs px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg shadow-sm"
+                  >
+                    <Check className="w-3.5 h-3.5 mr-1" />
+                    Done Editing
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div
+                onClick={() => onPostChange && setIsEditing(true)}
+                title={onPostChange ? 'Click to edit post text in preview' : undefined}
+                className={`text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap select-text text-slate-100/95 font-normal ${
+                  onPostChange ? 'cursor-pointer hover:bg-white/[0.02] p-1 rounded-lg transition-colors group relative' : ''
+                }`}
+              >
+                <div dangerouslySetInnerHTML={{ __html: formattedHtml }} />
+                {onPostChange && (
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute top-1 right-1 bg-slate-900/90 border border-slate-700 text-slate-300 text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm">
+                    <Edit3 className="w-2.5 h-2.5 text-cyan-400" />
+                    <span>Click to edit</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Inline Keyboard Buttons */}
             {buttonRows.length > 0 && (
               <div className="flex flex-col gap-1.5 pt-2">
                 {buttonRows.map((row, rIdx) => (
                   <div key={rIdx} className="flex items-center gap-1.5 w-full">
-                    {row.map((btn, bIdx) => (
-                      <a
-                        key={bIdx}
-                        href={btn.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex-1 bg-[#2b3e55]/80 hover:bg-[#344c68] active:bg-[#3d597a] border border-[#3b526f]/60 text-white rounded-lg py-2 px-3 text-center text-xs font-medium flex items-center justify-center gap-1.5 transition-colors shadow-sm group"
-                      >
-                        <span className="truncate">{btn.text}</span>
-                        <ExternalLink className="w-3 h-3 text-cyan-400/70 group-hover:text-cyan-300 shrink-0" />
-                      </a>
-                    ))}
+                    {row.map((btn, bIdx) => {
+                      const isLike = btn.callback_data === 'react_like' || btn.text.includes('❤️') || btn.text.toLowerCase().includes('like');
+                      if (isLike || (!btn.url && btn.callback_data)) {
+                        return (
+                          <button
+                            key={bIdx}
+                            type="button"
+                            onClick={() => {
+                              setIsLiked(!isLiked);
+                              setLikeCount((prev) => (isLiked ? prev - 1 : prev + 1));
+                              if (!isLiked) {
+                                toast.success('❤️ Liked! Telegram reaction recorded.');
+                              }
+                            }}
+                            className={`flex-1 border rounded-lg py-2 px-3 text-center text-xs font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 ${
+                              isLiked
+                                ? 'bg-rose-500/20 border-rose-500/60 text-rose-300 shadow-rose-950/40'
+                                : 'bg-[#2b3e55]/80 hover:bg-[#344c68] border-[#3b526f]/60 text-white'
+                            }`}
+                            title="Interactive like reaction"
+                          >
+                            <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-rose-400 text-rose-400 animate-bounce' : 'text-rose-400'}`} />
+                            <span className="truncate">{isLiked ? `❤️ Liked (${Math.max(1, likeCount + 1)})` : btn.text}</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <a
+                          key={bIdx}
+                          href={btn.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 bg-[#2b3e55]/80 hover:bg-[#344c68] active:bg-[#3d597a] border border-[#3b526f]/60 text-white rounded-lg py-2 px-3 text-center text-xs font-medium flex items-center justify-center gap-1.5 transition-colors shadow-sm group"
+                        >
+                          <span className="truncate">{btn.text}</span>
+                          <ExternalLink className="w-3 h-3 text-cyan-400/70 group-hover:text-cyan-300 shrink-0" />
+                        </a>
+                      );
+                    })}
                   </div>
                 ))}
               </div>

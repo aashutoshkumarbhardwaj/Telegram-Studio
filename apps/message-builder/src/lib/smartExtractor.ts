@@ -275,9 +275,96 @@ export function extractCta(category: ContentType, hasLink: boolean): string {
   }
 }
 
-export function buildButtons(primaryUrl: string | undefined, category: ContentType): InlineButton[] {
+/**
+ * Hyperlinks standalone URLs in text into clean HTML <a> tags without altering existing tags.
+ */
+export function hyperlinkUrls(text: string): string {
+  if (!text) return '';
+  return text.replace(/(https?:\/\/[^\s<>"'{}|\\^`[\]]+)/g, (url) => {
+    let label = url;
+    try {
+      const parsed = new URL(url);
+      label = parsed.hostname.replace(/^www\./, '') + (parsed.pathname !== '/' && parsed.pathname.length < 30 ? parsed.pathname : '');
+    } catch {
+      label = url;
+    }
+    return `<a href="${url}">${label}</a>`;
+  });
+}
+
+/**
+ * Formats user raw input into a complete, clean Telegram HTML post.
+ * Preserves paragraphs, sections, bullets, and all embedded links without cutting them out.
+ * Only truncates if text exceeds Telegram's 3800 character safety margin.
+ */
+export function formatRawContent(rawText: string, title: string, category: ContentType, primaryUrl?: string): string {
+  let text = (rawText || '').trim();
+  if (!text) return '';
+
+  const MAX_TELEGRAM_BODY_CHARS = 3800;
+  let truncatedNotice = '';
+  if (text.length > MAX_TELEGRAM_BODY_CHARS) {
+    text = text.slice(0, MAX_TELEGRAM_BODY_CHARS).trim();
+    truncatedNotice = '\n\n<i>[Content truncated to fit Telegram limit. Full details in link below.]</i>';
+  }
+
+  const lines = text.split('\n');
+  const formattedLines: string[] = [];
+  let skippedTitle = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+        formattedLines.push('');
+      }
+      continue;
+    }
+
+    // Skip the title if it appears identically at the very top
+    if (!skippedTitle && (trimmed === title || cleanHeadline([trimmed], category) === title)) {
+      skippedTitle = true;
+      continue;
+    }
+
+    // Common section headers: bold them for Telegram hierarchy
+    const isCommonHeader = /^(?:About(?: the Role)?|Overview|Requirements|Responsibilities|Qualifications|Compensation(?: & Benefits)?|Salary|Benefits|Perks|Eligibility|What You(?:'ll)? Do|How to Apply|Details|Prize Pool|Prizes|Key Features|Important Links|Timeline|Stipend|Location|Key Takeaways|Why It Matters):?$/i.test(trimmed);
+
+    if (isCommonHeader && !trimmed.startsWith('•') && !trimmed.startsWith('-') && !trimmed.startsWith('*')) {
+      const cleanHdr = trimmed.replace(/^[#*_\s]+|[#*_\s]+$/g, '').replace(/:?$/, ':');
+      formattedLines.push(`<b>${cleanHdr}</b>`);
+      continue;
+    }
+
+    // Standardize bullet points
+    if (/^[•\-*✓👉]\s+/.test(trimmed) || /^\d+[\.)]\s+/.test(trimmed)) {
+      const bulletContent = trimmed.replace(/^[•\-*✓👉\d.)]+\s*/, '');
+      formattedLines.push(`• ${hyperlinkUrls(bulletContent)}`);
+      continue;
+    }
+
+    // Regular paragraph line with hyperlinked URLs
+    formattedLines.push(hyperlinkUrls(trimmed));
+  }
+
+  let formatted = formattedLines.join('\n').trim();
+  if (!formatted) {
+    formatted = hyperlinkUrls(text);
+  }
+
+  return formatted + truncatedNotice;
+}
+
+export function buildButtons(
+  primaryUrl: string | undefined,
+  category: ContentType,
+  allUrls: string[] = []
+): InlineButton[] {
   const buttons: InlineButton[] = [];
 
+  // 1. Primary Action Button
   if (primaryUrl && primaryUrl.trim()) {
     const cleanUrl = primaryUrl.trim();
     let label = '📚 Read Source';
@@ -309,15 +396,20 @@ export function buildButtons(primaryUrl: string | undefined, category: ContentTy
     buttons.push({ text: label, url: cleanUrl });
   }
 
-  // 2. Auto-configured Like / React button
-  const likeUrl = primaryUrl ? `${primaryUrl.split('#')[0]}#like` : 'https://t.me/heyaaashu';
+  // 2. Secondary Link Button if multiple URLs exist
+  const secondaryUrl = allUrls.find((u) => u !== primaryUrl);
+  if (secondaryUrl) {
+    const secTitle = getDomainSourceTitle(secondaryUrl);
+    buttons.push({ text: `🔗 ${secTitle}`, url: secondaryUrl });
+  }
+
+  // 3. Auto-configured Like / React action button (real callback, no dummy link!)
   buttons.push({
     text: '❤️ Like',
-    url: likeUrl,
     callback_data: 'react_like',
   });
 
-  // 3. Always append community channel button
+  // 4. Always append community channel button
   buttons.push({ text: '💬 Discuss', url: 'https://t.me/heyaaashu' });
 
   return buttons;
@@ -332,6 +424,7 @@ export interface SmartExtractOptions {
 /**
  * Master Smart Extractor Function.
  * Converts unstructured input into a fully formed canonical PostSchema object.
+ * Preserves user content, paragraphs, and embedded links without cutting them out.
  */
 export function smartExtractPost(rawText: string, options: SmartExtractOptions = {}): PostSchema {
   const text = (rawText || '').trim();
@@ -365,7 +458,7 @@ export function smartExtractPost(rawText: string, options: SmartExtractOptions =
   // 4. Headline Extraction
   const title = cleanHeadline(rawLines, category);
 
-  // 5. Takeaways Extraction
+  // 5. Takeaways Extraction (for card summaries/metadata)
   const takeaways = extractTakeaways(rawLines, category);
 
   // 6. Why It Matters Extraction
@@ -386,12 +479,12 @@ export function smartExtractPost(rawText: string, options: SmartExtractOptions =
     summary = `Key developments and technical insights regarding ${title}.`;
   }
 
-  // 9. Assembled Canonical HTML Body
-  const takeawaysFormatted = takeaways.map((t) => `• ${t}`).join('\n');
-  const body = `${summary}\n\n⚡ <b>KEY TAKEAWAYS</b>\n${takeawaysFormatted}\n\n💡 <b>WHY IT MATTERS</b>\n${whyItMatters}\n\n${cta}`;
+  // 9. Assembled Full Body (Preserves all paragraphs, sections, and multiple links!)
+  const formattedBody = formatRawContent(text, title, category, primaryUrl);
+  const body = formattedBody || `${summary}\n\n⚡ <b>KEY TAKEAWAYS</b>\n${takeaways.map((t) => `• ${t}`).join('\n')}\n\n${cta}`;
 
-  // 10. Buttons
-  const buttons = buildButtons(primaryUrl, category);
+  // 10. Buttons (includes primary link, secondary link if present, Like action button, and Discuss)
+  const buttons = buildButtons(primaryUrl, category, foundUrls);
 
   // 11. Source & Verification
   const sourceTitle = primaryUrl ? getDomainSourceTitle(primaryUrl) : 'Official Announcement';

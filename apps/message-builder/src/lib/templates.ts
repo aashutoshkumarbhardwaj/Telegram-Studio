@@ -53,12 +53,13 @@ function formatAiNewsTemplate(post: PostSchema): string {
   const parts: string[] = ['🚨 <b>AI NEWS</b>\n'];
   parts.push(`🔥 <b>${escapeHtml(post.title)}</b>\n`);
 
-  const summary = post.summary || post.body;
-  if (summary) {
-    parts.push(`${escapeHtml(summary)}\n`);
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.summary) {
+    parts.push(`${escapeHtml(post.summary)}\n`);
   }
 
-  if (post.takeaways && post.takeaways.length > 0) {
+  if (post.takeaways && post.takeaways.length > 0 && (!post.body || !post.body.includes('KEY TAKEAWAYS'))) {
     parts.push('⚡ <b>KEY TAKEAWAYS</b>');
     for (const t of post.takeaways) {
       if (t.trim()) parts.push(`• ${escapeHtml(t.trim())}`);
@@ -66,12 +67,12 @@ function formatAiNewsTemplate(post: PostSchema): string {
     parts.push('');
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push('💡 <b>WHY IT MATTERS</b>');
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }
 
-  if (post.cta) {
+  if (post.cta && (!post.body || !post.body.includes(post.cta))) {
     parts.push(`👉 ${escapeHtml(post.cta)}\n`);
   }
 
@@ -97,17 +98,17 @@ function formatJobTemplate(post: PostSchema): string {
     parts.push(details.join('\n') + '\n');
   }
 
-  if (post.takeaways && post.takeaways.length > 0) {
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.takeaways && post.takeaways.length > 0) {
     parts.push("🧩 <b>WHAT YOU'LL DO</b>");
     for (const t of post.takeaways) {
       if (t.trim()) parts.push(`• ${escapeHtml(t.trim())}`);
     }
     parts.push('');
-  } else if (post.body) {
-    parts.push(`${escapeHtml(post.body)}\n`);
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push('🎯 <b>WHO SHOULD APPLY</b>');
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }
@@ -131,17 +132,17 @@ function formatInternshipTemplate(post: PostSchema): string {
     parts.push(details.join('\n') + '\n');
   }
 
-  if (post.takeaways && post.takeaways.length > 0) {
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.takeaways && post.takeaways.length > 0) {
     parts.push('⚡ <b>PROGRAM HIGHLIGHTS</b>');
     for (const t of post.takeaways) {
       if (t.trim()) parts.push(`• ${escapeHtml(t.trim())}`);
     }
     parts.push('');
-  } else if (post.body) {
-    parts.push(`${escapeHtml(post.body)}\n`);
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push('💡 <b>LEARNING OPPORTUNITY</b>');
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }
@@ -164,17 +165,17 @@ function formatHackathonTemplate(post: PostSchema): string {
     parts.push(details.join('\n') + '\n');
   }
 
-  if (post.takeaways && post.takeaways.length > 0) {
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.takeaways && post.takeaways.length > 0) {
     parts.push('💡 <b>WHAT TO BUILD</b>');
     for (const t of post.takeaways) {
       if (t.trim()) parts.push(`• ${escapeHtml(t.trim())}`);
     }
     parts.push('');
-  } else if (post.body) {
-    parts.push(`${escapeHtml(post.body)}\n`);
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push('🎯 <b>WHY JOIN</b>');
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }
@@ -187,12 +188,13 @@ function formatAiToolTemplate(post: PostSchema): string {
   const parts: string[] = ['🛠 <b>AI TOOL</b>\n'];
   parts.push(`🔥 <b>${escapeHtml(post.title)}</b>\n`);
 
-  const summary = post.summary || post.body;
-  if (summary) {
-    parts.push(`${escapeHtml(summary)}\n`);
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.summary) {
+    parts.push(`${escapeHtml(post.summary)}\n`);
   }
 
-  if (post.takeaways && post.takeaways.length > 0) {
+  if (post.takeaways && post.takeaways.length > 0 && (!post.body || !post.body.includes('WHAT IT DOES'))) {
     parts.push('⚡ <b>WHAT IT DOES</b>');
     for (const t of post.takeaways) {
       if (t.trim()) parts.push(`• ${escapeHtml(t.trim())}`);
@@ -200,12 +202,12 @@ function formatAiToolTemplate(post: PostSchema): string {
     parts.push('');
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push('🎯 <b>BEST FOR</b>');
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }
 
-  if (meta.pricing) {
+  if (meta.pricing && (!post.body || !post.body.includes(meta.pricing))) {
     parts.push('💰 <b>PRICING</b>');
     parts.push(`${escapeHtml(meta.pricing)}\n`);
   }
@@ -218,17 +220,18 @@ function formatGitHubTemplate(post: PostSchema): string {
   const parts: string[] = ['💻 <b>GITHUB</b>\n'];
   parts.push(`🔥 <b>${escapeHtml(post.title)}</b>\n`);
 
-  const summary = post.summary || post.body;
-  if (summary) {
-    parts.push(`${escapeHtml(summary)}\n`);
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.summary) {
+    parts.push(`${escapeHtml(post.summary)}\n`);
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push("⭐ <b>WHY IT'S INTERESTING</b>");
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }
 
-  if (meta.tech_stack) {
+  if (meta.tech_stack && (!post.body || !post.body.includes(meta.tech_stack))) {
     parts.push('🛠 <b>TECH STACK</b>');
     parts.push(`${escapeHtml(meta.tech_stack)}\n`);
   }
@@ -240,12 +243,13 @@ function formatCareerTemplate(post: PostSchema): string {
   const parts: string[] = ['🧠 <b>CAREER INSIGHT</b>\n'];
   parts.push(`🔥 <b>${escapeHtml(post.title)}</b>\n`);
 
-  const summary = post.summary || post.body;
-  if (summary) {
-    parts.push(`${escapeHtml(summary)}\n`);
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.summary) {
+    parts.push(`${escapeHtml(post.summary)}\n`);
   }
 
-  if (post.takeaways && post.takeaways.length > 0) {
+  if (post.takeaways && post.takeaways.length > 0 && (!post.body || !post.body.includes('KEY TAKEAWAYS'))) {
     parts.push('⚡ <b>KEY TAKEAWAYS</b>');
     for (const t of post.takeaways) {
       if (t.trim()) parts.push(`• ${escapeHtml(t.trim())}`);
@@ -253,7 +257,7 @@ function formatCareerTemplate(post: PostSchema): string {
     parts.push('');
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push('🎯 <b>ACTION STEPS</b>');
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }
@@ -265,12 +269,13 @@ function formatResourceTemplate(post: PostSchema): string {
   const parts: string[] = ['📚 <b>RESOURCE</b>\n'];
   parts.push(`🔥 <b>${escapeHtml(post.title)}</b>\n`);
 
-  const summary = post.summary || post.body;
-  if (summary) {
-    parts.push(`${escapeHtml(summary)}\n`);
+  if (post.body && post.body.trim()) {
+    parts.push(post.body.trim() + '\n');
+  } else if (post.summary) {
+    parts.push(`${escapeHtml(post.summary)}\n`);
   }
 
-  if (post.why_it_matters) {
+  if (post.why_it_matters && (!post.body || !post.body.includes(post.why_it_matters))) {
     parts.push('🎯 <b>BEST FOR</b>');
     parts.push(`${escapeHtml(post.why_it_matters)}\n`);
   }

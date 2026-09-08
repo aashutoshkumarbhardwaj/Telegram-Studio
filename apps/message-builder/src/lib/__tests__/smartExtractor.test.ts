@@ -166,7 +166,9 @@ Official link: https://blog.google/technology/ai/gemini-2-5/`;
       expect(post.buttons?.[0].url).toBe('https://blog.google/technology/ai/gemini-2-5/');
       expect(post.buttons?.[0].text).toBe('📚 Read Source');
       expect(post.buttons?.[1].text).toBe('❤️ Like');
-      expect(post.body).toContain('⚡ <b>KEY TAKEAWAYS</b>');
+      expect(post.buttons?.[1].callback_data).toBe('react_like');
+      expect(post.body).toContain('Native real-time streaming audio and video perception');
+      expect(post.body).toContain('href="https://blog.google/technology/ai/gemini-2-5/"');
     });
 
     it('honors explicitLink parameter even if text does not contain URL', () => {
