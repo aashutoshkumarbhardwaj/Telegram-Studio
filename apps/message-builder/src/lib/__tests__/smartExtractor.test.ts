@@ -124,24 +124,27 @@ describe('smartExtractor unit tests', () => {
   });
 
   describe('buildButtons', () => {
-    it('constructs primary button with contextual emoji and discuss button', () => {
+    it('constructs primary button with contextual emoji, like button, and discuss button', () => {
       const buttons = buildButtons('https://example.com/apply', 'job');
-      expect(buttons).toHaveLength(2);
+      expect(buttons).toHaveLength(3);
       expect(buttons[0].text).toBe('💼 Apply Now');
       expect(buttons[0].url).toBe('https://example.com/apply');
-      expect(buttons[1].text).toBe('💬 Discuss');
-      expect(buttons[1].url).toBe('https://t.me/heyaaashu');
+      expect(buttons[1].text).toBe('❤️ Like');
+      expect(buttons[1].callback_data).toBe('react_like');
+      expect(buttons[2].text).toBe('💬 Discuss');
+      expect(buttons[2].url).toBe('https://t.me/heyaaashu');
     });
 
-    it('handles missing primaryUrl by only including discuss button', () => {
+    it('handles missing primaryUrl by including like and discuss buttons', () => {
       const buttons = buildButtons(undefined, 'ai_news');
-      expect(buttons).toHaveLength(1);
-      expect(buttons[0].text).toBe('💬 Discuss');
+      expect(buttons).toHaveLength(2);
+      expect(buttons[0].text).toBe('❤️ Like');
+      expect(buttons[1].text).toBe('💬 Discuss');
     });
   });
 
   describe('smartExtractPost master pipeline', () => {
-    it('turns raw article text into canonical PostSchema with URL buttons', () => {
+    it('turns raw article text into canonical PostSchema with URL and Like buttons', () => {
       const raw = `Google Unveils Gemini 2.5 With Native Audio Streaming
 Google has announced Gemini 2.5, delivering sub-second voice perception.
 • Native real-time streaming audio and video perception.
@@ -159,9 +162,10 @@ Official link: https://blog.google/technology/ai/gemini-2-5/`;
       expect(post.source?.title).toBe('Google DeepMind');
       expect(post.source?.url).toBe('https://blog.google/technology/ai/gemini-2-5/');
       expect(post.verification?.status).toBe('verified');
-      expect(post.buttons).toHaveLength(2);
+      expect(post.buttons).toHaveLength(3);
       expect(post.buttons?.[0].url).toBe('https://blog.google/technology/ai/gemini-2-5/');
       expect(post.buttons?.[0].text).toBe('📚 Read Source');
+      expect(post.buttons?.[1].text).toBe('❤️ Like');
       expect(post.body).toContain('⚡ <b>KEY TAKEAWAYS</b>');
     });
 
@@ -177,6 +181,7 @@ Competitive salary $220k - $280k + equity.`;
       expect(post.source?.url).toBe(explicitLink);
       expect(post.buttons?.[0].text).toBe('💼 Apply Now');
       expect(post.buttons?.[0].url).toBe(explicitLink);
+      expect(post.buttons?.[1].text).toBe('❤️ Like');
     });
   });
 });

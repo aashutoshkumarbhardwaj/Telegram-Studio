@@ -1,33 +1,36 @@
-import React, { useState } from 'react';
-import { ContentType, InlineButton, PostSchema, VerificationStatus } from '@/types/postSchema';
+import React, { useState, useEffect } from 'react';
+import { ContentType, InlineButton, MediaItem, PostSchema } from '@/types/postSchema';
 import { TemplateStyle } from '@/lib/templates';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Plus,
-  Trash2,
-  Image as ImageIcon,
-  Link as LinkIcon,
-  ShieldCheck,
-  AlertTriangle,
-  Layers,
   Sparkles,
+  Zap,
+  Send,
+  ClipboardPaste,
+  Trash2,
+  Loader2,
+  CheckCircle2,
+  Link as LinkIcon,
   ExternalLink,
-  ChevronUp,
-  ChevronDown,
+  Plus,
   X,
+  ChevronDown,
+  ChevronUp,
+  SlidersHorizontal,
+  Layers,
 } from 'lucide-react';
-import { SmartAutoFillBar } from './SmartAutoFillBar';
+import { generatePostFromInput } from '@/lib/api';
+import { extractUrls, buildButtons } from '@/lib/smartExtractor';
+import { toast } from 'sonner';
 
 interface ContentEditorProps {
   post: PostSchema;
   templateStyle: TemplateStyle;
   onPostChange: (updater: (prev: PostSchema) => PostSchema) => void;
   onTemplateChange: (style: TemplateStyle) => void;
-  onOpenAIGenerator?: () => void;
   onPublishClick?: () => void;
   isPublishing?: boolean;
 }
@@ -37,18 +40,155 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
   templateStyle,
   onPostChange,
   onTemplateChange,
-  onOpenAIGenerator,
   onPublishClick,
   isPublishing = false,
 }) => {
-  const [newTakeaway, setNewTakeaway] = useState('');
-  const [newButtonText, setNewButtonText] = useState('');
-  const [newButtonUrl, setNewButtonUrl] = useState('');
-  const [isAddingButton, setIsAddingButton] = useState(false);
-  const [imageUrlInput, setImageUrlInput] = useState('');
-  const [isAddingImage, setIsAddingImage] = useState(false);
+  // Tabs: Content vs Link Tab
+  const [activeTab, setActiveTab] = useState<'content' | 'link'>('content');
+  const [rawText, setRawText] = useState('');
+  const [explicitLink, setExplicitLink] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [lastAutoFilledTitle, setLastAutoFilledTitle] = useState<string | null>(null);
 
-  // Field change helpers
+  // Custom button adder state
+  const [isAddingButton, setIsAddingButton] = useState(false);
+  const [newBtnText, setNewBtnText] = useState('');
+  const [newBtnUrl, setNewBtnUrl] = useState('');
+
+  // Optional fine-tune text drawer
+  const [showFineTune, setShowFineTune] = useState(false);
+
+  // Auto-extract link from raw text if user hasn't explicitly set one
+  useEffect(() => {
+    const urls = extractUrls(rawText);
+    if (urls.length > 0 && !explicitLink) {
+      setExplicitLink(urls[0]);
+    }
+  }, [rawText, explicitLink]);
+
+  // Sync explicitLink if post already has a source URL
+  useEffect(() => {
+    if (post.source?.url && !explicitLink) {
+      setExplicitLink(post.source.url);
+    }
+  }, [post.source?.url, explicitLink]);
+
+  const handlePasteClipboard = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setRawText((prev) => (prev ? `${prev}\n\n${text.trim()}` : text.trim()));
+          const urls = extractUrls(text);
+          if (urls.length > 0 && !explicitLink) {
+            setExplicitLink(urls[0]);
+          }
+          toast.success('📋 Pasted from clipboard!');
+        } else {
+          toast.info('Clipboard is empty. Use Ctrl+V / Cmd+V to paste.');
+        }
+      } else {
+        toast.info('Clipboard access restricted. Use Ctrl+V / Cmd+V directly in the box.');
+      }
+    } catch {
+      toast.info('Clipboard access denied. Use Ctrl+V / Cmd+V to paste.');
+    }
+  };
+
+  const handleClear = () => {
+    setRawText('');
+    setExplicitLink('');
+    setLastAutoFilledTitle(null);
+  };
+
+  // 1-Click Auto-Fill
+  const handleAutoFill = async () => {
+    const trimmedText = rawText.trim();
+    const trimmedLink = explicitLink.trim();
+
+    if (!trimmedText && !trimmedLink) {
+      toast.error('Please paste some content or a link first.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const inputToUse = trimmedText || trimmedLink;
+      const res = await generatePostFromInput({
+        input: inputToUse,
+        category: post.content_type,
+        link: trimmedLink || undefined,
+      });
+
+      if (res.success && res.post) {
+        onPostChange(() => res.post!);
+        setLastAutoFilledTitle(res.post.title);
+        toast.success('✨ Post auto-populated with Title, Bullets & Buttons!');
+      } else {
+        toast.error(res.error || 'Failed to auto-generate post.');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Auto-generation failed.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Category change helper (with auto-updating button labels if mistaken)
+  const handleCategoryChange = (newCat: ContentType) => {
+    onPostChange((prev) => {
+      // Re-label primary resource button if one exists
+      const updatedButtons = (prev.buttons || []).map((btn) => {
+        if (btn.text.includes('Read Source') || btn.text.includes('Apply') || btn.text.includes('Try Tool') || btn.text.includes('Register') || btn.text.includes('GitHub')) {
+          let label = '📚 Read Source';
+          if (newCat === 'job') label = '💼 Apply Now';
+          else if (newCat === 'internship') label = '🎓 Apply for Internship';
+          else if (newCat === 'hackathon') label = '🏆 Register Now';
+          else if (newCat === 'ai_tool') label = '🛠 Try Tool';
+          else if (newCat === 'github') label = '💻 View on GitHub';
+          else if (newCat === 'resource') label = '📖 Access Resource';
+          else if (newCat === 'career') label = '🚀 Read Guide';
+          return { ...btn, text: label };
+        }
+        return btn;
+      });
+
+      return {
+        ...prev,
+        content_type: newCat,
+        buttons: updatedButtons,
+      };
+    });
+  };
+
+  // Button management helpers
+  const handleRemoveButton = (index: number) => {
+    onPostChange((prev) => ({
+      ...prev,
+      buttons: (prev.buttons || []).filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleAddCustomButton = () => {
+    if (!newBtnText.trim() || !newBtnUrl.trim()) {
+      toast.error('Please enter both button text and URL.');
+      return;
+    }
+    const newBtn: InlineButton = {
+      text: newBtnText.trim(),
+      url: newBtnUrl.trim(),
+    };
+    onPostChange((prev) => ({
+      ...prev,
+      buttons: [...(prev.buttons || []), newBtn],
+    }));
+    setNewBtnText('');
+    setNewBtnUrl('');
+    setIsAddingButton(false);
+    toast.success('Button added!');
+  };
+
+  // Fine-tune text changes
   const handleTitleChange = (val: string) => {
     onPostChange((prev) => ({ ...prev, title: val }));
   };
@@ -57,182 +197,201 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
     onPostChange((prev) => ({ ...prev, body: val, summary: val }));
   };
 
-  const handleWhyItMattersChange = (val: string) => {
-    onPostChange((prev) => ({ ...prev, why_it_matters: val }));
-  };
-
-  const handleCtaChange = (val: string) => {
-    onPostChange((prev) => ({ ...prev, cta: val }));
-  };
-
-  const handleContentTypeChange = (type: ContentType) => {
-    onPostChange((prev) => ({ ...prev, content_type: type }));
-  };
-
-  // Metadata field change
-  const handleMetaChange = (key: string, val: string) => {
+  const handleImageChange = (url: string) => {
+    const trimmed = url.trim();
     onPostChange((prev) => ({
       ...prev,
-      metadata: { ...(prev.metadata || {}), [key]: val },
+      media: trimmed ? [{ type: 'photo', url_or_path: trimmed }] : [],
     }));
   };
 
-  // Takeaways
-  const handleAddTakeaway = () => {
-    if (!newTakeaway.trim()) return;
-    onPostChange((prev) => ({
-      ...prev,
-      takeaways: [...(prev.takeaways || []), newTakeaway.trim()],
-    }));
-    setNewTakeaway('');
-  };
-
-  const handleRemoveTakeaway = (index: number) => {
-    onPostChange((prev) => ({
-      ...prev,
-      takeaways: (prev.takeaways || []).filter((_, i) => i !== index),
-    }));
-  };
-
-  // Buttons
-  const handleAddButton = () => {
-    if (!newButtonText.trim() || !newButtonUrl.trim()) return;
-    const btn: InlineButton = {
-      text: newButtonText.trim(),
-      url: newButtonUrl.trim(),
-    };
-    onPostChange((prev) => ({
-      ...prev,
-      buttons: [...(prev.buttons || []), btn],
-    }));
-    setNewButtonText('');
-    setNewButtonUrl('');
-    setIsAddingButton(false);
-  };
-
-  const handleRemoveButton = (index: number) => {
-    onPostChange((prev) => ({
-      ...prev,
-      buttons: (prev.buttons || []).filter((_, i) => i !== index),
-    }));
-  };
-
-  const handleMoveButton = (index: number, direction: 'up' | 'down') => {
-    onPostChange((prev) => {
-      const btns = [...(prev.buttons || [])];
-      const targetIdx = direction === 'up' ? index - 1 : index + 1;
-      if (targetIdx < 0 || targetIdx >= btns.length) return prev;
-      const temp = btns[index];
-      btns[index] = btns[targetIdx];
-      btns[targetIdx] = temp;
-      return { ...prev, buttons: btns };
-    });
-  };
-
-  // Source & Verification
-  const handleSourceNameChange = (val: string) => {
-    onPostChange((prev) => ({
-      ...prev,
-      source: { ...(prev.source || { title: '', url: '' }), title: val },
-    }));
-  };
-
-  const handleSourceUrlChange = (val: string) => {
-    onPostChange((prev) => ({
-      ...prev,
-      source: { ...(prev.source || { title: '', url: '' }), url: val },
-    }));
-  };
-
-  const handleVerificationChange = (status: VerificationStatus) => {
-    onPostChange((prev) => ({
-      ...prev,
-      verification: { ...(prev.verification || { status: 'verified', sources: [] }), status },
-    }));
-  };
-
-  // Media
-  const handleAttachImage = (url: string) => {
-    if (!url.trim()) return;
-    onPostChange((prev) => ({
-      ...prev,
-      media: [{ type: 'photo', url_or_path: url.trim() }],
-    }));
-    setImageUrlInput('');
-    setIsAddingImage(false);
-  };
-
-  const handleRemoveImage = () => {
-    onPostChange((prev) => ({
-      ...prev,
-      media: [],
-    }));
-  };
-
-  const currentMedia = post.media && post.media.length > 0 ? post.media[0] : null;
-  const meta = post.metadata || {};
+  const detectedUrls = extractUrls(rawText);
+  const activeButtons = post.buttons || [];
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-5 w-full">
-      {/* 1-Click Smart Auto-Fill & Magic Ingest Bar */}
-      <SmartAutoFillBar
-        onPostGenerated={(newPost) => {
-          onPostChange(() => newPost);
-        }}
-        onPublishClick={onPublishClick}
-        isPublishing={isPublishing}
-      />
+    <div className="flex flex-col gap-3.5 sm:gap-4 w-full p-1 sm:p-2">
+      {/* ─── 1. HERO: MAGIC SMART AUTO-FILL CARD ──────────────────────────── */}
+      <div className="flex flex-col gap-3 p-3.5 sm:p-4 rounded-2xl bg-gradient-to-b from-slate-900/95 via-slate-950/90 to-slate-900/95 border border-cyan-500/35 backdrop-blur-xl shadow-xl shadow-black/40">
+        {/* Header with Title & Tabs */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/30 border border-cyan-500/50 flex items-center justify-center text-cyan-400 shadow-inner">
+              <Zap className="w-4 h-4 text-cyan-300" />
+            </div>
+            <div>
+              <h3 className="text-xs sm:text-sm font-bold text-white tracking-wide flex items-center gap-1.5">
+                <span>Magic Smart Auto-Fill</span>
+                <span className="text-[10px] font-medium bg-cyan-950/80 border border-cyan-700/60 text-cyan-300 px-1.5 py-0.2 rounded-full">
+                  1-Click
+                </span>
+              </h3>
+              <p className="text-[10px] text-slate-400">
+                Paste content or link — we auto-configure title, bullets, source & buttons
+              </p>
+            </div>
+          </div>
 
-      {/* Optional link to Full AI Generator Modal */}
-      {onOpenAIGenerator && (
-        <div className="flex justify-end px-1 -mt-2">
-          <button
-            type="button"
-            onClick={onOpenAIGenerator}
-            className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
-          >
-            <Sparkles className="w-3 h-3 text-cyan-400" />
-            <span>Need alternate headline hooks or visual concepts? Open AI Dialog →</span>
-          </button>
+          {/* Tab Switcher: Content vs Link Tab */}
+          <div className="flex items-center bg-slate-950/80 border border-slate-800 p-0.5 rounded-xl text-xs shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('content')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                activeTab === 'content'
+                  ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              📝 Content
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('link')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1 ${
+                activeTab === 'link'
+                  ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <LinkIcon className="w-3 h-3" />
+              <span>Link Tab</span>
+              {explicitLink && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />}
+            </button>
+          </div>
         </div>
-      )}
 
-      {/* 1. Content Type & Template Style */}
-      <div className="flex flex-col gap-2.5 p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl backdrop-blur-sm shadow-sm">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-cyan-400" />
-            Category & Template
-          </Label>
-        </div>
+        {/* Tab 1: Content Textarea */}
+        {activeTab === 'content' && (
+          <div className="flex flex-col gap-2 animate-in fade-in duration-150">
+            <Textarea
+              value={rawText}
+              onChange={(e) => setRawText(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAutoFill();
+                }
+              }}
+              placeholder="Paste article, tweet, newsletter, job post, or announcement here... (Press Cmd/Ctrl+Enter to auto-fill)"
+              rows={4}
+              className="text-xs sm:text-xs leading-relaxed bg-slate-950/80 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40 p-3 shadow-inner resize-none font-sans"
+            />
 
-        <div className="grid grid-cols-2 gap-2.5">
+            {/* Quick Action Helpers */}
+            <div className="flex items-center justify-between gap-1 text-[11px]">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePasteClipboard}
+                  className="h-7 px-2 text-[11px] bg-slate-950/60 border-slate-800 hover:border-cyan-500/40 text-slate-300 hover:text-white rounded-lg"
+                >
+                  <ClipboardPaste className="w-3 h-3 mr-1 text-cyan-400" />
+                  Paste Clipboard
+                </Button>
+
+                {rawText && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClear}
+                    className="h-7 px-2 text-[11px] text-slate-400 hover:text-rose-300 rounded-lg"
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" />
+                    Clear
+                  </Button>
+                )}
+              </div>
+
+              {detectedUrls.length > 0 && (
+                <span className="text-[10px] text-cyan-400 font-mono flex items-center gap-1 bg-cyan-950/50 px-2 py-0.5 rounded-md border border-cyan-900/60 truncate max-w-[170px] sm:max-w-[220px]">
+                  <LinkIcon className="w-2.5 h-2.5 shrink-0" />
+                  {detectedUrls[0].replace(/^https?:\/\//, '')}
+                </span>
+              )}
+            </div>
+
+            {/* Compact Link Row */}
+            <div className="flex items-center gap-1.5 bg-slate-950/60 border border-slate-800/80 rounded-xl px-2.5 py-1 mt-0.5">
+              <LinkIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <input
+                type="text"
+                value={explicitLink}
+                onChange={(e) => setExplicitLink(e.target.value)}
+                placeholder="Source Link (Optional — auto-detected if included in text)"
+                className="bg-transparent border-none text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none w-full font-mono"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Dedicated Link Tab */}
+        {activeTab === 'link' && (
+          <div className="flex flex-col gap-2 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1">
+                <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
+                Source URL / Action Link
+              </span>
+              <span className="text-[10px] text-slate-500">Auto-wired into buttons</span>
+            </div>
+            <Input
+              value={explicitLink}
+              onChange={(e) => setExplicitLink(e.target.value)}
+              placeholder="https://... (e.g. original article, job posting, repo link)"
+              className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-lg font-mono"
+            />
+            <p className="text-[10px] text-slate-400 leading-tight">
+              💡 If you copied content without links, enter the link here. It will automatically become the primary source and the Telegram action button.
+            </p>
+          </div>
+        )}
+
+        {/* ─── CATEGORY & TEMPLATE CORRECTION ROW ─────────────────────────── */}
+        <div className="grid grid-cols-2 gap-2.5 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80">
           <div>
-            <span className="text-[11px] text-slate-400 font-medium mb-1 block">Category</span>
-            <Select value={post.content_type} onValueChange={(v) => handleContentTypeChange(v as ContentType)}>
-              <SelectTrigger className="h-9 sm:h-8 text-xs bg-slate-950/70 border-slate-800 text-slate-200 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1">
+                <Layers className="w-3 h-3 text-cyan-400" />
+                Category
+              </span>
+              <span className="text-[9px] text-cyan-400/80 font-mono">Auto-chosen</span>
+            </div>
+            <Select
+              value={post.content_type}
+              onValueChange={(val) => handleCategoryChange(val as ContentType)}
+            >
+              <SelectTrigger className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-200 rounded-lg">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
-              <SelectContent className="bg-slate-900 border-slate-800 text-slate-200">
+              <SelectContent className="bg-slate-900 border-slate-800 text-slate-200 text-xs z-50">
                 <SelectItem value="ai_news">🚨 AI News</SelectItem>
-                <SelectItem value="job">💼 Job</SelectItem>
+                <SelectItem value="job">💼 Job Alert</SelectItem>
                 <SelectItem value="internship">🎓 Internship</SelectItem>
                 <SelectItem value="hackathon">🏆 Hackathon</SelectItem>
                 <SelectItem value="ai_tool">🛠 AI Tool</SelectItem>
                 <SelectItem value="github">💻 GitHub</SelectItem>
-                <SelectItem value="career">🧠 Career</SelectItem>
+                <SelectItem value="career">🚀 Career</SelectItem>
                 <SelectItem value="resource">📚 Resource</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div>
-            <span className="text-[11px] text-slate-400 font-medium mb-1 block">Template Layout</span>
-            <Select value={templateStyle} onValueChange={(v) => onTemplateChange(v as TemplateStyle)}>
-              <SelectTrigger className="h-9 sm:h-8 text-xs bg-slate-950/70 border-slate-800 text-slate-200 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40">
-                <SelectValue placeholder="Template" />
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-slate-300">Template Layout</span>
+              <span className="text-[9px] text-cyan-400/80 font-mono">Layout</span>
+            </div>
+            <Select
+              value={templateStyle}
+              onValueChange={(val) => onTemplateChange(val as TemplateStyle)}
+            >
+              <SelectTrigger className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-200 rounded-lg">
+                <SelectValue placeholder="Layout" />
               </SelectTrigger>
-              <SelectContent className="bg-slate-900 border-slate-800 text-slate-200">
+              <SelectContent className="bg-slate-900 border-slate-800 text-slate-200 text-xs z-50">
                 <SelectItem value="auto">✨ Auto (Recommended)</SelectItem>
                 <SelectItem value="ai_news">Editorial (AI News)</SelectItem>
                 <SelectItem value="job">Job Card</SelectItem>
@@ -246,402 +405,184 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({
             </Select>
           </div>
         </div>
-      </div>
 
-      {/* 2. Core Content */}
-      <div className="flex flex-col gap-3 p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl backdrop-blur-sm shadow-sm">
-        <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-          Post Content
-        </Label>
-
-        <div>
-          <span className="text-xs font-medium text-slate-300 mb-1 block">Headline</span>
-          <Input
-            value={post.title}
-            onChange={(e) => handleTitleChange(e.target.value)}
-            placeholder="e.g. Google DeepMind Unveils Next-Gen Gemini Reasoning Architecture"
-            className="text-sm font-semibold bg-slate-950/70 border-slate-800 text-white placeholder:text-slate-500 rounded-xl h-11 focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40 transition-all shadow-inner"
-          />
-        </div>
-
-        <div>
-          <span className="text-xs font-medium text-slate-300 mb-1 block">Summary / Body</span>
-          <Textarea
-            value={post.body}
-            onChange={(e) => handleBodyChange(e.target.value)}
-            placeholder="Explain the core announcement concisely..."
-            rows={4}
-            className="text-sm leading-relaxed bg-slate-950/70 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40 transition-all shadow-inner p-3"
-          />
-        </div>
-
-        {/* Dynamic Category Metadata */}
-        {(post.content_type === 'job' || post.content_type === 'internship') && (
-          <div className="grid grid-cols-2 gap-2.5 p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl">
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Company</span>
-              <Input
-                value={meta.company || ''}
-                onChange={(e) => handleMetaChange('company', e.target.value)}
-                placeholder="e.g. Modal"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
+        {/* ─── AUTO-CONFIGURED BUTTONS MANAGER ─────────────────────────────── */}
+        <div className="flex flex-col gap-2 p-2.5 sm:p-3 rounded-xl bg-slate-950/70 border border-slate-800/80">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
+              <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Auto-Configured Buttons</span>
+              <span className="text-[10px] text-slate-500 font-normal">({activeButtons.length})</span>
             </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Location</span>
-              <Input
-                value={meta.location || ''}
-                onChange={(e) => handleMetaChange('location', e.target.value)}
-                placeholder="e.g. Remote / SF"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">
-                {post.content_type === 'job' ? 'Salary' : 'Stipend'} (Optional)
-              </span>
-              <Input
-                value={post.content_type === 'job' ? (meta.salary || '') : (meta.stipend || '')}
-                onChange={(e) => handleMetaChange(post.content_type === 'job' ? 'salary' : 'stipend', e.target.value)}
-                placeholder="e.g. $180k - $240k"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Deadline</span>
-              <Input
-                value={meta.deadline || ''}
-                onChange={(e) => handleMetaChange('deadline', e.target.value)}
-                placeholder="e.g. Rolling / Oct 30"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsAddingButton(!isAddingButton)}
+              className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Add Custom Button</span>
+            </button>
           </div>
-        )}
 
-        {post.content_type === 'hackathon' && (
-          <div className="grid grid-cols-2 gap-2.5 p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl">
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Prize Pool</span>
-              <Input
-                value={meta.prize || ''}
-                onChange={(e) => handleMetaChange('prize', e.target.value)}
-                placeholder="e.g. $150,000"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Registration Deadline</span>
-              <Input
-                value={meta.deadline || ''}
-                onChange={(e) => handleMetaChange('deadline', e.target.value)}
-                placeholder="e.g. Oct 28, 2026"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Team Size</span>
-              <Input
-                value={meta.team_size || ''}
-                onChange={(e) => handleMetaChange('team_size', e.target.value)}
-                placeholder="e.g. 1 - 4 Members"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Format / Location</span>
-              <Input
-                value={meta.location || ''}
-                onChange={(e) => handleMetaChange('location', e.target.value)}
-                placeholder="e.g. Online / Global"
-                className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-              />
-            </div>
-          </div>
-        )}
-
-        {post.content_type === 'ai_tool' && (
-          <div className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl">
-            <span className="text-[11px] text-slate-400 font-medium block mb-0.5">Pricing / Model</span>
-            <Input
-              value={meta.pricing || ''}
-              onChange={(e) => handleMetaChange('pricing', e.target.value)}
-              placeholder="e.g. Open Source (MIT) / Free Tier + $20/mo"
-              className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 rounded-lg"
-            />
-          </div>
-        )}
-
-        {/* 3. Key Takeaways List */}
-        <div className="flex flex-col gap-2 pt-1">
-          <span className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-            <span>Key Takeaways (Bullets)</span>
-            <span className="text-[10px] text-slate-500 font-normal">{(post.takeaways || []).length} items</span>
-          </span>
-
-          <div className="flex flex-col gap-2">
-            {(post.takeaways || []).map((t, idx) => (
-              <div key={idx} className="flex items-center gap-2 bg-slate-950/70 border border-slate-800/90 rounded-xl p-2.5 shadow-inner">
-                <span className="text-cyan-400 font-bold text-xs pl-0.5">•</span>
-                <span className="text-xs text-slate-200 flex-1 select-text leading-tight">{t}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleRemoveTakeaway(idx)}
-                  className="h-6 w-6 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg"
+          {/* Button Chips */}
+          <div className="flex flex-wrap gap-1.5">
+            {activeButtons.length === 0 && (
+              <span className="text-[11px] text-slate-500 italic">No buttons attached yet.</span>
+            )}
+            {activeButtons.map((btn, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 shadow-sm"
+              >
+                <span className="font-medium text-[11px]">{btn.text}</span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveButton(idx)}
+                  className="text-slate-500 hover:text-rose-400 p-0.5 rounded transition-colors"
+                  title="Remove button"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                  <X className="w-3 h-3" />
+                </button>
               </div>
             ))}
-
-            <div className="flex items-center gap-2 mt-1">
-              <Input
-                value={newTakeaway}
-                onChange={(e) => setNewTakeaway(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddTakeaway()}
-                placeholder="Add a bullet takeaway..."
-                className="h-9 text-xs bg-slate-950/70 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40"
-              />
-              <Button size="sm" onClick={handleAddTakeaway} className="h-9 px-3 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl shadow-sm">
-                <Plus className="w-3.5 h-3.5" />
-              </Button>
-            </div>
           </div>
-        </div>
 
-        {/* 4. Why It Matters */}
-        <div>
-          <span className="text-xs font-semibold text-slate-300 mb-1 block">Why It Matters / Best For</span>
-          <Textarea
-            value={post.why_it_matters || ''}
-            onChange={(e) => handleWhyItMattersChange(e.target.value)}
-            placeholder="Contextual insight or target audience..."
-            rows={2}
-            className="text-xs leading-relaxed bg-slate-950/70 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40 p-3 shadow-inner"
-          />
-        </div>
-      </div>
-
-      {/* 5. Source & Verification Panel */}
-      <div className="flex flex-col gap-3 p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl backdrop-blur-sm shadow-sm">
-        <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-          <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
-          Source & Trust Verification
-        </Label>
-
-        <div className="grid grid-cols-2 gap-2.5">
-          <div>
-            <span className="text-[11px] text-slate-400 font-medium block mb-1">Source Name</span>
-            <Input
-              value={post.source?.title || ''}
-              onChange={(e) => handleSourceNameChange(e.target.value)}
-              placeholder="e.g. Google Official Blog"
-              className="h-9 text-xs bg-slate-950/70 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40"
-            />
-          </div>
-          <div>
-            <span className="text-[11px] text-slate-400 font-medium block mb-1">Source URL</span>
-            <Input
-              value={post.source?.url || ''}
-              onChange={(e) => handleSourceUrlChange(e.target.value)}
-              placeholder="https://..."
-              className="h-9 text-xs bg-slate-950/70 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40"
-            />
-          </div>
-        </div>
-
-        <div>
-          <span className="text-[11px] text-slate-400 font-medium block mb-1.5">Verification Status</span>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant={post.verification?.status === 'verified' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => handleVerificationChange('verified')}
-              className={`h-8 text-xs flex-1 rounded-xl transition-all ${
-                post.verification?.status === 'verified'
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-950 border-emerald-500'
-                  : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:text-emerald-300'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5 mr-1" />
-              Verified
-            </Button>
-            <Button
-              type="button"
-              variant={post.verification?.status === 'needs_verification' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => handleVerificationChange('needs_verification')}
-              className={`h-8 text-xs flex-1 rounded-xl transition-all ${
-                post.verification?.status === 'needs_verification'
-                  ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-sm shadow-amber-950 border-amber-500'
-                  : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:text-amber-300'
-              }`}
-            >
-              <AlertTriangle className="w-3.5 h-3.5 mr-1" />
-              Needs Verification
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* 6. Media Attachment */}
-      <div className="flex flex-col gap-2.5 p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl backdrop-blur-sm shadow-sm">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
-            Media Attachment
-          </Label>
-          {currentMedia && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleRemoveImage}
-              className="h-6 text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 px-2 rounded-lg"
-            >
-              Remove
-            </Button>
-          )}
-        </div>
-
-        {currentMedia ? (
-          <div className="relative rounded-xl overflow-hidden border border-slate-800 max-h-48 bg-slate-950 flex items-center justify-center shadow-inner">
-            <img
-              src={currentMedia.url_or_path}
-              alt="Post media"
-              className="w-full h-40 object-cover"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-          </div>
-        ) : isAddingImage ? (
-          <div className="flex flex-col gap-2 pt-1">
-            <Input
-              value={imageUrlInput}
-              onChange={(e) => setImageUrlInput(e.target.value)}
-              placeholder="Paste image URL (https://...)"
-              className="h-9 text-xs bg-slate-950/70 border-slate-800 text-slate-100 placeholder:text-slate-500 rounded-xl focus:border-cyan-500/80 focus:ring-1 focus:ring-cyan-500/40"
-            />
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => handleAttachImage(imageUrlInput)} className="h-8 text-xs flex-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl">
-                Attach Image
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsAddingImage(false)}
-                className="h-8 text-xs px-3 text-slate-400 hover:text-slate-200 rounded-xl"
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsAddingImage(true)}
-            className="h-9 text-xs border border-dashed border-slate-800 hover:border-cyan-500/50 bg-slate-950/40 text-slate-300 hover:text-white rounded-xl transition-all"
-          >
-            <Plus className="w-3.5 h-3.5 mr-1" />
-            Add Image (URL or Upload)
-          </Button>
-        )}
-      </div>
-
-      {/* 7. Inline Buttons Builder */}
-      <div className="flex flex-col gap-2.5 p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl backdrop-blur-sm shadow-sm">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
-            Inline Keyboard Buttons
-          </Label>
-          <span className="text-[10px] text-slate-500">{(post.buttons || []).length} buttons</span>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          {(post.buttons || []).map((btn, idx) => (
-            <div
-              key={idx}
-              className="flex items-center justify-between bg-slate-950/70 border border-slate-800/90 rounded-xl p-2.5 gap-2 shadow-inner"
-            >
-              <div className="flex-1 min-w-0">
-                <span className="text-xs font-medium text-slate-200 block truncate">{btn.text}</span>
-                <span className="text-[10px] text-cyan-400 block truncate font-mono">{btn.url}</span>
+          {/* Inline Add Button Form */}
+          {isAddingButton && (
+            <div className="flex flex-col gap-2 p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 mt-1 animate-in fade-in duration-150">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Input
+                  value={newBtnText}
+                  onChange={(e) => setNewBtnText(e.target.value)}
+                  placeholder="Button Label (e.g. 🎁 Claim Bonus)"
+                  className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100"
+                />
+                <Input
+                  value={newBtnUrl}
+                  onChange={(e) => setNewBtnUrl(e.target.value)}
+                  placeholder="URL (https://...)"
+                  className="h-8 text-xs bg-slate-950 border-slate-800 text-slate-100 font-mono"
+                />
               </div>
-              <div className="flex items-center gap-0.5">
+              <div className="flex justify-end gap-2">
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={idx === 0}
-                  onClick={() => handleMoveButton(idx, 'up')}
-                  className="h-6 w-6 text-slate-400 hover:text-slate-200 disabled:opacity-20 rounded-md"
-                >
-                  <ChevronUp className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={idx === (post.buttons || []).length - 1}
-                  onClick={() => handleMoveButton(idx, 'down')}
-                  className="h-6 w-6 text-slate-400 hover:text-slate-200 disabled:opacity-20 rounded-md"
-                >
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleRemoveButton(idx)}
-                  className="h-6 w-6 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-md"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
-
-          {isAddingButton ? (
-            <div className="flex flex-col gap-2 p-2.5 bg-slate-950/80 border border-slate-800 rounded-xl mt-1">
-              <Input
-                value={newButtonText}
-                onChange={(e) => setNewButtonText(e.target.value)}
-                placeholder="Button Label (e.g. 📚 Read Source)"
-                className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-100 rounded-lg"
-              />
-              <Input
-                value={newButtonUrl}
-                onChange={(e) => setNewButtonUrl(e.target.value)}
-                placeholder="Target URL (https://...)"
-                className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-100 rounded-lg font-mono"
-              />
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddButton} className="h-7 text-xs flex-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg">
-                  Add Button
-                </Button>
-                <Button
+                  type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsAddingButton(false)}
-                  className="h-7 text-xs px-2 text-slate-400 rounded-lg"
+                  className="h-7 text-xs px-2.5 text-slate-400 hover:text-white"
                 >
                   Cancel
                 </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleAddCustomButton}
+                  className="h-7 text-xs px-3 bg-cyan-600 hover:bg-cyan-500 text-white"
+                >
+                  Add
+                </Button>
               </div>
             </div>
-          ) : (
+          )}
+        </div>
+
+        {/* Primary Action Buttons: Auto-Fill & Publish */}
+        <div className="flex items-center gap-2 pt-1">
+          <Button
+            type="button"
+            onClick={handleAutoFill}
+            disabled={isLoading || (!rawText.trim() && !explicitLink.trim())}
+            className="flex-1 h-9 sm:h-9 text-xs sm:text-xs font-bold bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl shadow-lg shadow-cyan-950/60 transition-all active:scale-[0.98]"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                Generating Post...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-cyan-200" />
+                Auto-Fill Post
+              </>
+            )}
+          </Button>
+
+          {onPublishClick && (
             <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsAddingButton(true)}
-              className="h-9 text-xs border border-dashed border-slate-800 hover:border-cyan-500/50 bg-slate-950/40 text-slate-300 hover:text-white rounded-xl transition-all mt-0.5"
+              type="button"
+              onClick={onPublishClick}
+              disabled={isPublishing}
+              className="h-9 px-4 text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl shadow-lg shadow-emerald-950/60 shrink-0 transition-all active:scale-[0.98]"
+              title="Publish directly to Telegram"
             >
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              Add Button
+              <Send className="w-3.5 h-3.5 mr-1 text-emerald-100" />
+              Publish
             </Button>
           )}
         </div>
+
+        {/* Ready Status Feedback */}
+        {lastAutoFilledTitle && (
+          <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300 animate-in fade-in duration-200">
+            <span className="flex items-center gap-1.5 truncate">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="truncate font-medium">Ready: {lastAutoFilledTitle}</span>
+            </span>
+            <span className="text-[10px] text-emerald-400/80 shrink-0 font-semibold pl-2">
+              Preview updated
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ─── 2. OPTIONAL FINE-TUNE DRAWER (COLLAPSED BY DEFAULT) ─────────── */}
+      <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 overflow-hidden shadow-sm">
+        <button
+          type="button"
+          onClick={() => setShowFineTune(!showFineTune)}
+          className="w-full px-3.5 py-2.5 text-xs text-slate-400 hover:text-slate-200 flex items-center justify-between transition-colors bg-slate-900/40"
+        >
+          <span className="flex items-center gap-1.5 font-medium">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Fine-Tune Text & Media (Optional)</span>
+          </span>
+          {showFineTune ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+
+        {showFineTune && (
+          <div className="p-3.5 flex flex-col gap-3 border-t border-slate-800/80 animate-in fade-in duration-150">
+            <div>
+              <span className="text-[11px] font-medium text-slate-300 block mb-1">Headline</span>
+              <Input
+                value={post.title}
+                onChange={(e) => handleTitleChange(e.target.value)}
+                placeholder="Post Headline..."
+                className="h-8 text-xs bg-slate-900 border-slate-800 text-white font-medium rounded-lg"
+              />
+            </div>
+
+            <div>
+              <span className="text-[11px] font-medium text-slate-300 block mb-1">Formatted Message Body</span>
+              <Textarea
+                value={post.body}
+                onChange={(e) => handleBodyChange(e.target.value)}
+                rows={5}
+                className="text-xs leading-relaxed bg-slate-900 border-slate-800 text-slate-100 p-2.5 resize-none font-sans rounded-lg"
+              />
+            </div>
+
+            <div>
+              <span className="text-[11px] font-medium text-slate-300 block mb-1">Media Image URL (Optional)</span>
+              <Input
+                value={post.media && post.media[0] ? post.media[0].url_or_path : ''}
+                onChange={(e) => handleImageChange(e.target.value)}
+                placeholder="https://... (Optional image attachment)"
+                className="h-8 text-xs bg-slate-900 border-slate-800 text-slate-100 font-mono rounded-lg"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

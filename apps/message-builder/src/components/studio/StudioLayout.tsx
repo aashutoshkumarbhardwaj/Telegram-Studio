@@ -47,6 +47,7 @@ const DEFAULT_POST: PostSchema = {
   cta: 'Explore documentation and benchmark details in the link below.',
   buttons: [
     { text: '📚 Read Source', url: 'https://blog.google/technology/ai/gemini-pro-reasoning/' },
+    { text: '❤️ Like', url: 'https://blog.google/technology/ai/gemini-pro-reasoning/#like', callback_data: 'react_like' },
     { text: '💬 Discuss', url: 'https://t.me/heyaaashu' },
   ],
   source: {

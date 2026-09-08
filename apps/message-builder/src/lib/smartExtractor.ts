@@ -298,7 +298,15 @@ export function buildButtons(primaryUrl: string | undefined, category: ContentTy
     buttons.push({ text: label, url: cleanUrl });
   }
 
-  // Always append community channel button
+  // 2. Auto-configured Like / React button
+  const likeUrl = primaryUrl ? `${primaryUrl.split('#')[0]}#like` : 'https://t.me/heyaaashu';
+  buttons.push({
+    text: '❤️ Like',
+    url: likeUrl,
+    callback_data: 'react_like',
+  });
+
+  // 3. Always append community channel button
   buttons.push({ text: '💬 Discuss', url: 'https://t.me/heyaaashu' });
 
   return buttons;
