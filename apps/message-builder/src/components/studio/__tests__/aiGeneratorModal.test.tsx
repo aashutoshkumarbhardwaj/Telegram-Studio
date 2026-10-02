@@ -7,6 +7,8 @@ import * as api from '@/lib/api';
 vi.mock('@/lib/api', () => ({
   generatePostFromInput: vi.fn(),
   generateHookOptions: vi.fn(),
+  getStoredGeminiApiKey: vi.fn(() => ''),
+  setStoredGeminiApiKey: vi.fn(),
 }));
 
 describe('AIGeneratorModal Component', () => {

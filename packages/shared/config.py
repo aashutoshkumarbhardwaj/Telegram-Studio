@@ -39,13 +39,14 @@ PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", os.getenv("RENDER_EXTERNAL_URL
 
 
 # --- LLM & AI ---
-LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini" if os.getenv("GEMINI_API_KEY") else "openai").strip().lower()
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "gpt-4o")
+LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "gemini-2.5-flash" if os.getenv("GEMINI_API_KEY") else "gpt-4o")
 
 # --- Language ---
 LANGUAGE: str = os.getenv("LANGUAGE", os.getenv("CONTENT_LANGUAGE", "en"))

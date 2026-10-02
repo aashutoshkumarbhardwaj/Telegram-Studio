@@ -58,6 +58,23 @@ export function clearStudioAuthToken(): void {
   }
 }
 
+export const GEMINI_API_KEY_STORAGE = 'heyaaashu_gemini_api_key';
+
+export function getStoredGeminiApiKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(GEMINI_API_KEY_STORAGE);
+}
+
+export function setStoredGeminiApiKey(key: string): void {
+  if (typeof window !== 'undefined') {
+    if (key && key.trim()) {
+      localStorage.setItem(GEMINI_API_KEY_STORAGE, key.trim());
+    } else {
+      localStorage.removeItem(GEMINI_API_KEY_STORAGE);
+    }
+  }
+}
+
 export function getRequestHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -67,6 +84,10 @@ export function getRequestHeaders(): Record<string, string> {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
     headers['X-Studio-Auth'] = token;
+  }
+  const geminiKey = getStoredGeminiApiKey();
+  if (geminiKey) {
+    headers['X-Gemini-API-Key'] = geminiKey;
   }
   return headers;
 }
@@ -331,10 +352,14 @@ export async function generatePostFromInput(
   req: GenerateRequest
 ): Promise<GenerateResponse> {
   try {
+    const payload = {
+      ...req,
+      gemini_api_key: req.gemini_api_key || req.api_key || getStoredGeminiApiKey() || undefined,
+    };
     const res = await fetch(`${API_BASE_URL}/generate`, {
       method: 'POST',
       headers: getRequestHeaders(),
-      body: JSON.stringify(req),
+      body: JSON.stringify(payload),
     });
 
     if (res.status === 401) {

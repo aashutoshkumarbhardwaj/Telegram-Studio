@@ -30,10 +30,11 @@ import {
   ChevronDown,
   ChevronUp,
   Send,
+  Key,
 } from 'lucide-react';
 import { ContentType, PostSchema } from '@/types/postSchema';
 import { GenerateResponse, HookOption, QualityScores } from '@/types/generator';
-import { generatePostFromInput } from '@/lib/api';
+import { generatePostFromInput, getStoredGeminiApiKey, setStoredGeminiApiKey } from '@/lib/api';
 import { extractUrls } from '@/lib/smartExtractor';
 import { toast } from 'sonner';
 
@@ -62,6 +63,8 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
   const [category, setCategory] = useState<ContentType | 'auto'>('auto');
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
+  const [geminiKey, setGeminiKey] = useState('');
+  const [showKeyConfig, setShowKeyConfig] = useState(false);
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -71,7 +74,7 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUrlError, setIsUrlError] = useState(false);
 
-  // Reset when opened
+  // Reset and load key when opened
   useEffect(() => {
     if (isOpen) {
       setGenResult(null);
@@ -79,6 +82,10 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
       setIsUrlError(false);
       setStageIndex(0);
       setLinkVal('');
+      const stored = getStoredGeminiApiKey();
+      if (stored) {
+        setGeminiKey(stored);
+      }
     }
   }, [isOpen]);
 
@@ -101,6 +108,14 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
     return () => clearInterval(timer);
   }, [isGenerating]);
 
+  const handleSaveGeminiKey = (val: string) => {
+    setGeminiKey(val);
+    setStoredGeminiApiKey(val);
+    if (val.trim()) {
+      toast.success('Gemini API key saved!');
+    }
+  };
+
   const handleGenerate = async () => {
     const trimmed = inputVal.trim();
     const trimmedLink = linkVal.trim();
@@ -121,6 +136,7 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
         category: category === 'auto' ? undefined : category,
         notes: notes.trim() || undefined,
         link: trimmedLink || undefined,
+        gemini_api_key: geminiKey.trim() || undefined,
       });
 
       if (res.success && res.post && res.draft_id) {
@@ -234,6 +250,66 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
               </div>
             )}
 
+            {/* Optional Gemini API Key Banner / Config */}
+            <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowKeyConfig(!showKeyConfig)}
+                  className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-cyan-300 transition-colors"
+                >
+                  <Key className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Gemini API Key:</span>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    {geminiKey ? '••••••••' + geminiKey.slice(-4) : '(Optional / Uses backend default)'}
+                  </span>
+                  {showKeyConfig ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+                </button>
+                {geminiKey && (
+                  <span className="text-[10px] bg-emerald-950/80 border border-emerald-800 text-emerald-300 px-1.5 py-0.5 rounded font-mono">
+                    Active
+                  </span>
+                )}
+              </div>
+
+              {showKeyConfig && (
+                <div className="mt-2.5 pt-2 border-t border-slate-800 space-y-1.5 animate-in fade-in duration-150">
+                  <Label htmlFor="gemini-key-input" className="text-[11px] text-slate-400 flex justify-between">
+                    <span>Google Gemini API Key (saved in browser)</span>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-400 hover:underline text-[10px]"
+                    >
+                      Get Key →
+                    </a>
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="gemini-key-input"
+                      type="password"
+                      placeholder="AIzaSy..."
+                      value={geminiKey}
+                      onChange={(e) => handleSaveGeminiKey(e.target.value)}
+                      className="h-8 text-xs bg-slate-950 border-slate-700 text-white font-mono placeholder:text-slate-600"
+                    />
+                    {geminiKey && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleSaveGeminiKey('')}
+                        className="h-8 px-2 text-xs text-slate-400 hover:text-red-400"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="ai-input" className="text-xs font-medium text-slate-300 flex items-center justify-between">
                 <span>Input (URL, Article Text, or Topic Idea)</span>
@@ -291,6 +367,7 @@ export const AIGeneratorModal: React.FC<AIGeneratorModalProps> = ({
                     <SelectItem value="job">💼 Job Opportunity</SelectItem>
                     <SelectItem value="internship">🎓 Internship Alert</SelectItem>
                     <SelectItem value="hackathon">🏆 Hackathon</SelectItem>
+                    <SelectItem value="github">💻 GitHub Repository</SelectItem>
                     <SelectItem value="ai_tool">🛠 AI Tool & SaaS</SelectItem>
                     <SelectItem value="career">🚀 Career Strategy</SelectItem>
                     <SelectItem value="resource">📚 Developer Resource</SelectItem>

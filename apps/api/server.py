@@ -443,12 +443,19 @@ async def generate_post_endpoint(request: web.Request) -> web.Response:
 
         category = body.get("category", "auto")
         notes = body.get("notes", "")
+        api_key = (
+            body.get("api_key")
+            or body.get("gemini_api_key")
+            or request.headers.get("X-Gemini-API-Key")
+            or ""
+        ).strip()
 
         result = await generate_post_from_input(
             raw_input=raw_input,
             category_override=category,
             notes=notes,
             link=link or None,
+            api_key=api_key or None,
         )
 
         post: PostSchema = result["post"]
@@ -474,6 +481,7 @@ async def generate_post_endpoint(request: web.Request) -> web.Response:
                 category_override=category,
                 notes=notes,
                 link=link or None,
+                api_key=api_key or None,
             )
             post: PostSchema = result["post"]
             user_id = body.get("user_id", 1)

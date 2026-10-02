@@ -5,6 +5,8 @@ export interface GenerateRequest {
   category?: ContentType | 'auto';
   notes?: string;
   link?: string;
+  api_key?: string;
+  gemini_api_key?: string;
 }
 
 export interface HookOption {

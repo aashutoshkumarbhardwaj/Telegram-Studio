@@ -1,17 +1,22 @@
 """
 AI Content Generator Engine for Heyaaashu Studio.
-Translates URLs, raw articles, and rough ideas into canonical PostSchema instances.
+Translates URLs, raw articles, job listings, and rough ideas into canonical PostSchema instances.
 Features:
+- Google Gemini API integration (gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-flash)
+- Fallback OpenAI-compatible completions (OpenAI, OpenRouter, DeepSeek)
 - Robust, timeout-resilient URL scraping with content cleaning
 - Deterministic category auto-detection with ambiguity warning flags
+- Billion-dollar company grade Telegram copywriting & structure for Jobs, News, Tools, GitHub
 - 3 distinct hook generation and multi-metric scoring
-- Factual extraction preserving PostSchema constraints (never outputting N/A or Unknown)
+- Interactive action buttons (Apply Now, Register, Try Tool, View on GitHub) + Like callback + Discuss
 - Multi-dimensional Quality Analyzer (0-100)
 - Minimalist editorial visual concept generator
 """
 
 import asyncio
+import json
 import logging
+import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -27,6 +32,16 @@ from packages.post_schema import (
     SourceInfo,
     VerificationInfo,
     VerificationStatus,
+)
+from packages.shared.config import (
+    ANTHROPIC_API_KEY,
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_BASE_URL,
+    GEMINI_API_KEY,
+    LLM_MODEL_NAME,
+    LLM_PROVIDER,
+    OPENAI_API_KEY,
+    OPENROUTER_API_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,53 +115,59 @@ async def fetch_and_clean_url(url: str, timeout: float = 5.0) -> Dict[str, Any]:
             og_site = soup.find("meta", attrs={"property": "og:site_name"})
             if og_site and og_site.get("content"):
                 site_name = og_site["content"].strip()
+            elif soup.find("meta", attrs={"name": "application-name"}):
+                site_name = soup.find("meta", attrs={"name": "application-name"}).get("content", "").strip()
+
             if not site_name:
-                if "blog.google" in url:
-                    site_name = "Google Blog"
-                elif "openai.com" in url:
-                    site_name = "OpenAI"
-                elif "anthropic.com" in url:
-                    site_name = "Anthropic"
-                elif "github.com" in url:
-                    site_name = "GitHub"
-                elif "deepmind.google" in url:
-                    site_name = "Google DeepMind"
+                domain_match = re.search(r"https?://(?:www\.)?([^/]+)", url)
+                if domain_match:
+                    domain = domain_match.group(1).lower()
+                    if "github.com" in domain:
+                        site_name = "GitHub"
+                    elif "google" in domain:
+                        site_name = "Google"
+                    elif "openai" in domain:
+                        site_name = "OpenAI"
+                    elif "anthropic" in domain:
+                        site_name = "Anthropic"
+                    elif "huggingface" in domain:
+                        site_name = "Hugging Face"
+                    elif "devpost" in domain:
+                        site_name = "Devpost"
+                    elif "linkedin" in domain:
+                        site_name = "LinkedIn"
+                    else:
+                        site_name = domain.split(".")[0].capitalize()
                 else:
-                    domain_match = re.search(r"https?://(?:www\.)?([^/]+)", url)
-                    site_name = domain_match.group(1).capitalize() if domain_match else "Official Source"
+                    site_name = "Official Source"
 
-            # Extract published date
+            # Extract publication time
             published_at = None
-            date_meta = soup.find("meta", attrs={"property": "article:published_time"}) or soup.find("meta", attrs={"name": "date"})
-            if date_meta and date_meta.get("content"):
-                published_at = date_meta["content"].strip()
+            time_tag = soup.find("time") or soup.find("meta", attrs={"property": "article:published_time"})
+            if time_tag:
+                published_at = time_tag.get("datetime") or time_tag.get("content")
 
-            # Strip non-content tags
-            for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form", "svg", "noscript"]):
+            # Remove noise: scripts, styles, navigations, footers, sidebars
+            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "svg"]):
                 tag.decompose()
 
-            # Look for main article body
-            article_tag = soup.find("article") or soup.find("main") or soup.find("div", class_=re.compile(r"article|post|content|entry", re.I))
-            source_soup = article_tag if article_tag else soup.body if soup.body else soup
+            # Find main article or body content
+            main_content = soup.find("article") or soup.find("main") or soup.find("div", class_=re.compile(r"content|post|article|body|job-description|description", re.I)) or soup.body
+            raw_text = main_content.get_text(separator="\n") if main_content else soup.get_text(separator="\n")
 
-            paragraphs = []
-            for p in source_soup.find_all(["p", "h1", "h2", "h3", "li"]):
-                p_text = p.get_text(separator=" ", strip=True)
-                if len(p_text) > 20 and not re.search(r"cookie|privacy policy|terms of service|all rights reserved", p_text, re.I):
-                    paragraphs.append(p_text)
+            # Clean and normalize paragraphs
+            lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+            cleaned_text = "\n".join(lines[:60])  # Take first 60 relevant lines
 
-            cleaned_text = "\n\n".join(paragraphs[:25])  # Cap at first 25 substantial paragraphs
-            if not cleaned_text and title:
-                cleaned_text = title
+            if len(cleaned_text) < 40 and not title:
+                raise UrlFetchError("Extracted content is too short or blocked by paywall/JS rendering.")
 
             return {
-                "title": title or "Industry Update",
+                "title": title or "Official Announcement",
                 "site_name": site_name,
-                "url": str(resp.url),
-                "published_at": published_at,
                 "text": cleaned_text,
+                "published_at": published_at,
             }
-
     except httpx.TimeoutException:
         raise UrlFetchError("Timeout: Source URL took too long to respond.")
     except httpx.RequestError as e:
@@ -163,21 +184,24 @@ CATEGORY_SIGNALS: Dict[ContentType, List[str]] = {
     ContentType.JOB: [
         "hiring", "job", "career opportunity", "salary", "compensation", "benefits",
         "apply now", "responsibilities", "requirements", "engineer position", "full-time",
-        "remote role", "work with us", "job description", "apply for this job",
+        "remote role", "work with us", "job description", "apply for this job", "senior engineer",
+        "staff engineer", "software engineer",
     ],
     ContentType.INTERNSHIP: [
         "internship", "intern", "summer intern", "stipend", "students", "graduates",
-        "pre-final year", "co-op", "campus hiring", "fellowship",
+        "pre-final year", "co-op", "campus hiring", "fellowship", "2025 intern", "2026 intern",
     ],
     ContentType.HACKATHON: [
         "hackathon", "prize pool", "devpost", "bounties", "submission deadline",
         "team size", "register today", "build products", "hackathon prizes",
     ],
+    ContentType.GITHUB: [
+        "github.com", "open source", "repository", "stars", "pull request",
+        "git clone", "mit license", "apache 2.0", "readme.md", "repo", "forks",
+    ],
     ContentType.AI_TOOL: [
         "ai tool", "saas", "pricing", "features", "dashboard", "try for free",
         "browser extension", "web app", "desktop app", "ai assistant tool",
-        "github.com", "open source", "repository", "stars", "pull request",
-        "git clone", "mit license", "apache 2.0", "readme.md",
     ],
     ContentType.CAREER: [
         "career guide", "resume", "interview prep", "salary negotiation",
@@ -185,7 +209,7 @@ CATEGORY_SIGNALS: Dict[ContentType, List[str]] = {
     ],
     ContentType.RESOURCE: [
         "cheat sheet", "cheatsheet", "curated list", "collection of prompts",
-        "benchmark datasets", "learning resource", "documentation guide",
+        "benchmark datasets", "learning resource", "documentation guide", "free course",
     ],
 }
 
@@ -199,14 +223,15 @@ def detect_category(text: str, url: Optional[str] = None) -> Tuple[ContentType, 
 
     # Direct URL rules
     if url:
-        if "github.com" in url.lower():
-            return ContentType.AI_TOOL, 0.95, False
-        if "devpost.com" in url.lower() or "hackerearth.com" in url.lower():
+        url_lower = url.lower()
+        if "github.com" in url_lower:
+            return ContentType.GITHUB, 0.95, False
+        if "devpost.com" in url_lower or "hackerearth.com" in url_lower or "dorahacks.io" in url_lower:
             return ContentType.HACKATHON, 0.95, False
-        if "lever.co" in url.lower() or "greenhouse.io" in url.lower() or "workday" in url.lower() or "careers" in url.lower():
+        if any(h in url_lower for h in ["lever.co", "greenhouse.io", "workday", "careers", "jobs.", "/jobs/", "ashbyhq.com", "wellfound.com"]):
             if "intern" in combined:
-                return ContentType.INTERNSHIP, 0.90, False
-            return ContentType.JOB, 0.90, False
+                return ContentType.INTERNSHIP, 0.92, False
+            return ContentType.JOB, 0.92, False
 
     # Score categories based on keyword occurrences
     scores: Dict[ContentType, int] = {cat: 0 for cat in ContentType}
@@ -217,7 +242,7 @@ def detect_category(text: str, url: Optional[str] = None) -> Tuple[ContentType, 
                 scores[cat] += 2 if len(kw.split()) > 1 else 1
 
     # High priority keyword override for Jobs and Internships
-    if any(k in combined for k in ["apply here", "job application", "we are hiring", "salary:"]):
+    if any(k in combined for k in ["apply here", "job application", "we are hiring", "we're hiring", "salary:"]):
         if "intern" in combined:
             return ContentType.INTERNSHIP, 0.88, False
         return ContentType.JOB, 0.88, False
@@ -261,19 +286,19 @@ def generate_hook_options(raw_title: str, text: str, category: ContentType) -> L
     if not core or len(core) < 5:
         core = "Key AI Industry Milestone"
 
-    options: List[Tuple[str, str]] = []
-
     # 1. Option A: Punchy / Direct Action
     if category == ContentType.JOB:
-        opt_a = f"Hiring: {core}" if "hiring" not in core.lower() else core
+        opt_a = f"💼 Hiring: {core}" if "hiring" not in core.lower() else f"💼 {core}"
     elif category == ContentType.INTERNSHIP:
-        opt_a = f"Internship Alert: {core}" if "intern" not in core.lower() else core
+        opt_a = f"🎓 Internship Alert: {core}" if "intern" not in core.lower() else f"🎓 {core}"
     elif category == ContentType.HACKATHON:
-        opt_a = f"Hackathon: {core}" if "hackathon" not in core.lower() else core
+        opt_a = f"🏆 Hackathon: {core}" if "hackathon" not in core.lower() else f"🏆 {core}"
+    elif category == ContentType.GITHUB:
+        opt_a = f"💻 GitHub: {core}"
     elif category == ContentType.AI_TOOL:
-        opt_a = f"{core} — Next-Gen AI Tool"
+        opt_a = f"🛠 {core} — Next-Gen AI Tool"
     else:
-        opt_a = core
+        opt_a = f"🚀 {core}"
 
     # 2. Option B: Scale / Impact / Metric
     if "billion" in text.lower() or "million" in text.lower():
@@ -282,8 +307,12 @@ def generate_hook_options(raw_title: str, text: str, category: ContentType) -> L
         opt_b = f"{core} Crosses {metric}"
     elif category == ContentType.JOB:
         opt_b = f"High-Impact Engineering Role: {core}"
+    elif category == ContentType.INTERNSHIP:
+        opt_b = f"Frontier Engineering Internship: {core}"
     elif category == ContentType.HACKATHON:
         opt_b = f"{core}: Compete & Build with Next-Gen AI"
+    elif category == ContentType.GITHUB:
+        opt_b = f"{core} — Open Source AI Repository"
     elif category == ContentType.AI_TOOL:
         opt_b = f"Supercharge Your Workflow With {core}"
     else:
@@ -294,107 +323,77 @@ def generate_hook_options(raw_title: str, text: str, category: ContentType) -> L
         opt_c = f"Join the Team Behind {core}"
     elif category == ContentType.INTERNSHIP:
         opt_c = f"Hands-On AI Experience: {core}"
+    elif category == ContentType.GITHUB:
+        opt_c = f"Why Developers Are Starring {core}"
     elif category == ContentType.AI_TOOL:
         opt_c = f"Why Developers Are Adopting {core}"
     else:
         opt_c = f"Why {core} Signals a Major Shift in AI"
 
-    raw_candidates = [
+    raw_options = [
         (opt_a, "punchy"),
         (opt_b, "scale"),
         (opt_c, "context"),
     ]
 
-    scored_hooks: List[HookOption] = []
-    for text_opt, style in raw_candidates:
-        # Cap length to 100 chars
-        clean_text = text_opt.strip()
-        if len(clean_text) > 100:
-            clean_text = clean_text[:97] + "..."
+    hook_objects: List[HookOption] = []
+    for hook_text, style in raw_options:
+        length = len(hook_text)
+        brevity = max(60, min(98, 100 - abs(length - 55)))
+        clarity = 90 if any(w in hook_text.lower() for w in ["ai", "hiring", "internship", "tool", "launches", "crosses"]) else 75
+        curiosity = 95 if style in ("punchy", "scale") else 85
+        score = int((clarity * 0.4) + (curiosity * 0.4) + (brevity * 0.2))
 
-        # Score clarity (penalty for excessive length or symbols)
-        clarity = 95 - max(0, len(clean_text) - 70) // 2
-        # Score curiosity (bonus for action verbs or provocative keywords)
-        curiosity = 85 + (5 if any(w in clean_text.lower() for w in ["why", "new", "signals", "benchmark", "alert"]) else 0)
-        # Score brevity
-        brevity = 100 if len(clean_text) <= 65 else 88 if len(clean_text) <= 85 else 75
+        hook_objects.append(
+            HookOption(
+                text=hook_text,
+                score=score,
+                style=style,
+                clarity=clarity,
+                curiosity=curiosity,
+                brevity=brevity,
+            )
+        )
 
-        overall_score = round((clarity * 0.4) + (curiosity * 0.35) + (brevity * 0.25))
-
-        scored_hooks.append(HookOption(
-            text=clean_text,
-            score=overall_score,
-            style=style,
-            clarity=clarity,
-            curiosity=curiosity,
-            brevity=brevity,
-        ))
-
-    scored_hooks.sort(key=lambda h: h.score, reverse=True)
-    return scored_hooks
+    hook_objects.sort(key=lambda h: h.score, reverse=True)
+    return hook_objects
 
 
-# ─── 4. QUALITY ANALYZER ───────────────────────────────────────────────────────
+# ─── 4. QUALITY ANALYZER ──────────────────────────────────────────────────────
 
-def analyze_post_quality(post: PostSchema, has_source: bool = True) -> QualityMetrics:
-    """
-    Computes quality scores across 6 dimensions (0-100) and an overall score.
-    Returns status: 'ready' (>= 80) or 'needs_review' (< 80).
-    """
-    # 1. Hook Score
-    hook_len = len(post.title)
-    if 30 <= hook_len <= 85:
+def analyze_post_quality(post: PostSchema, has_source: bool) -> QualityMetrics:
+    """Evaluates the post against Telegram publishing quality criteria."""
+    title_len = len(post.title)
+    if 25 <= title_len <= 90:
         hook_score = 95
-    elif 15 <= hook_len < 30 or 85 < hook_len <= 110:
-        hook_score = 85
+    elif 15 <= title_len < 25:
+        hook_score = 80
     else:
-        hook_score = 70
+        hook_score = 65
 
-    # 2. Clarity Score
-    has_html_tags = bool(re.search(r"<b>|•|⚡", post.body))
-    clarity_score = 92 if has_html_tags else 78
-    if len(post.body.splitlines()) >= 4:
-        clarity_score = min(100, clarity_score + 6)
+    has_bad_formatting = "<p>" in post.body or "<div>" in post.body or "**" in post.body
+    clarity_score = 70 if has_bad_formatting else 92
 
-    # 3. Value Score (Presence of Takeaways & Why it matters)
-    has_takeaways = "KEY TAKEAWAYS" in post.body or "⚡" in post.body or (post.takeaways and len(post.takeaways) >= 2)
-    has_why_matters = "WHY IT MATTERS" in post.body or "💡" in post.body or bool(post.why_it_matters)
-    value_score = 95 if (has_takeaways and has_why_matters) else 80 if (has_takeaways or has_why_matters) else 65
+    has_takeaways = bool(post.takeaways) or "⚡" in post.body
+    has_why_it_matters = bool(post.why_it_matters) or "💡" in post.body
+    value_score = 95 if (has_takeaways and has_why_it_matters) else (80 if has_takeaways else 60)
 
-    # 4. Readability Score (length and pacing)
     body_len = len(post.body)
-    if 250 <= body_len <= 1400:
+    if 200 <= body_len <= 1500:
         readability_score = 95
-    elif body_len < 250:
-        readability_score = 80
-    else:
+    elif body_len < 200:
         readability_score = 75
-
-    # 5. Source Score
-    if post.source and post.source.url and post.source.title:
-        source_score = 100
-    elif post.source and post.source.url:
-        source_score = 90
-    elif has_source:
-        source_score = 80
     else:
-        source_score = 50
+        readability_score = 80
 
-    # 6. Completeness Score
-    completeness_factors = [
-        bool(post.title),
-        bool(post.body),
-        bool(post.content_type),
-        bool(post.buttons and len(post.buttons) > 0),
-        bool(post.source and post.source.url),
-    ]
-    completeness_score = int((sum(completeness_factors) / len(completeness_factors)) * 100)
+    source_score = 100 if (has_source and post.verification.status == VerificationStatus.VERIFIED) else (85 if has_source else 50)
+    has_buttons = len(post.buttons) >= 1
+    completeness_score = 95 if (has_buttons and post.title and post.body) else 70
 
-    # Overall weighted score
     overall = int(
         (hook_score * 0.20)
-        + (clarity_score * 0.15)
-        + (value_score * 0.25)
+        + (clarity_score * 0.20)
+        + (value_score * 0.20)
         + (readability_score * 0.15)
         + (source_score * 0.15)
         + (completeness_score * 0.10)
@@ -420,7 +419,7 @@ def suggest_visual_concept(post: PostSchema) -> VisualConcept:
     """
     Determines if post benefits from a visual asset and generates an editorial prompt.
     """
-    visual_types = {ContentType.AI_NEWS, ContentType.AI_TOOL, ContentType.HACKATHON}
+    visual_types = {ContentType.AI_NEWS, ContentType.AI_TOOL, ContentType.HACKATHON, ContentType.GITHUB}
     needs_visual = post.content_type in visual_types or "model" in post.title.lower() or "architecture" in post.title.lower()
 
     if not needs_visual:
@@ -429,7 +428,6 @@ def suggest_visual_concept(post: PostSchema) -> VisualConcept:
             concept="Text-first structured announcement. Media optional.",
         )
 
-    # Editorial, clean, dark-tech aesthetic description
     concept = (
         f"Minimalist editorial graphic for '{post.title}'. "
         "Dark slate background, glowing cyan and electric blue typography accents, "
@@ -439,22 +437,381 @@ def suggest_visual_concept(post: PostSchema) -> VisualConcept:
     return VisualConcept(needs_visual=True, concept=concept)
 
 
-# ─── 6. MASTER GENERATOR ORCHESTRATOR ─────────────────────────────────────────
+# ─── 6. GEMINI & LLM AI COPYWRITING ENGINE ────────────────────────────────────
+
+GEMINI_SYSTEM_PROMPT = """You are the elite chief copywriter for 'Heyaaashu | AI & Tech Careers', a premier Telegram channel with 100,000+ software engineers, AI researchers, and tech builders.
+Your Telegram posts are legendary: crisp, high-converting, visually structured, and free of generic corporate fluff.
+
+Your goal is to write a high-engagement Telegram post from the provided input (job posting, URL content, AI announcement, tool release, GitHub repo, or notes).
+
+STRICT FORMATTING RULES:
+1. Parse mode is HTML. Use ONLY supported Telegram HTML tags: <b>bold</b>, <i>italic</i>, <code>code</code>. NEVER use markdown symbols like **, ##, or <p>/<div>/<br>.
+2. Headline (title):
+   - For Jobs: '💼 [Company] is Hiring [Role Name]' (e.g. '💼 Anthropic is Hiring AI Systems Engineers ($260k-$340k)')
+   - For Internships: '🎓 [Company] [Year] [Role] Internship' (e.g. '🎓 Google 2026 AI Research Internship Open')
+   - For AI News: Punchy and urgent (e.g. '🚀 OpenAI Launches GPT-5 with Native Multimodal Reasoning')
+   - For AI Tools: Clear utility (e.g. '🛠 Cursor 2.0: Next-Gen AI Code Editor')
+   - For GitHub: '💻 [Repo Name]: [One-line capability]' (e.g. '💻 vLLM: High-Throughput LLM Serving Engine')
+   - For Hackathons: '🏆 [Hackathon Name]: [Prize Pool & Theme]'
+3. Body Structure:
+   - Opening Hook: 1-2 sharp, engaging sentences explaining the announcement or role opportunity.
+   - Middle Section:
+     * If Job / Internship:
+       ⚡ <b>ROLE DETAILS</b>
+       • <b>Company:</b> [Company Name]
+       • <b>Location:</b> [Location / Remote status]
+       • <b>Experience:</b> [Level or Years required]
+       • <b>Key Skills:</b> [Top 3-4 technologies / requirements]
+       • <b>Compensation:</b> [Salary / Stipend if mentioned, or 'Competitive Industry Standard']
+       
+       💡 <b>WHY APPLY</b>
+       [1-2 sentences on why this role is a great career accelerator]
+       
+       👉 <i>Click 'Apply Now' below to submit your application directly.</i>
+     * If AI News / Tool / GitHub / Hackathon / Resource:
+       ⚡ <b>KEY HIGHLIGHTS</b>
+       • [Key capability or metric 1]
+       • [Key technical breakthrough 2]
+       • [Developer availability, pricing, or repo status 3]
+       
+       💡 <b>WHY IT MATTERS</b>
+       [1-2 sentences on industry / builder impact]
+       
+       👉 <i>Check the official link below for full details.</i>
+4. Category must be one of: 'ai_news', 'job', 'internship', 'hackathon', 'ai_tool', 'github', 'career', 'resource'.
+5. Suggested Button Label:
+   - For Job: '💼 Apply Now'
+   - For Internship: '🎓 Apply for Internship'
+   - For Hackathon: '🏆 Register Now'
+   - For AI Tool: '🛠 Try Tool'
+   - For GitHub: '💻 View on GitHub'
+   - For Career: '🚀 Read Guide'
+   - For Resource: '📖 Access Resource'
+   - For AI News: '📚 Read Source'
+
+Return valid JSON with:
+{
+  "content_type": "...",
+  "title": "...",
+  "body": "...",
+  "summary": "...",
+  "takeaways": ["...", "..."],
+  "why_it_matters": "...",
+  "cta": "...",
+  "suggested_button_label": "...",
+  "hashtags": ["...", "..."],
+  "keywords": ["...", "..."]
+}
+"""
+
+
+async def call_gemini_generator(
+    content_corpus: str,
+    primary_url: Optional[str] = None,
+    category_hint: Optional[str] = None,
+    api_key: Optional[str] = None,
+    timeout: float = 12.0,
+) -> Optional[Dict[str, Any]]:
+    """
+    Calls Google Gemini API (gemini-2.5-flash / gemini-2.0-flash / gemini-1.5-flash)
+    to generate executive-tier structured Telegram post copy.
+    """
+    key = (api_key or GEMINI_API_KEY).strip()
+    if not key:
+        return None
+
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
+    user_prompt = "Transform the following input into a canonical Telegram post object.\n\n"
+    if primary_url:
+        user_prompt += f"PRIMARY URL: {primary_url}\n"
+    if category_hint and category_hint != "auto":
+        user_prompt += f"CATEGORY OVERRIDE: {category_hint}\n"
+    user_prompt += f"INPUT CONTENT:\n{content_corpus[:5000]}"
+
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_prompt}],
+            }
+        ],
+        "systemInstruction": {
+            "parts": [{"text": GEMINI_SYSTEM_PROMPT}]
+        },
+        "generationConfig": {
+            "temperature": 0.3,
+            "responseMimeType": "application/json",
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for model in models:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+            try:
+                resp = await client.post(endpoint, json=payload, headers={"Content-Type": "application/json"})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            text_resp = parts[0]["text"].strip()
+                            if text_resp.startswith("```json"):
+                                text_resp = text_resp[7:]
+                            if text_resp.startswith("```"):
+                                text_resp = text_resp[3:]
+                            if text_resp.endswith("```"):
+                                text_resp = text_resp[:-3]
+                            parsed = json.loads(text_resp.strip())
+                            logger.info(f"Successfully generated post copy with Gemini model: {model}")
+                            return parsed
+                else:
+                    logger.warning(f"Gemini model {model} returned HTTP {resp.status_code}: {resp.text[:150]}")
+            except Exception as e:
+                logger.warning(f"Gemini API attempt with {model} failed: {e}")
+                continue
+
+    return None
+
+
+async def call_openai_compatible_generator(
+    content_corpus: str,
+    primary_url: Optional[str] = None,
+    category_hint: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: str = "https://api.openai.com/v1",
+    model: str = "gpt-4o-mini",
+    timeout: float = 12.0,
+) -> Optional[Dict[str, Any]]:
+    """Calls OpenAI-compatible completion API as a secondary LLM option."""
+    key = (api_key or OPENAI_API_KEY or OPENROUTER_API_KEY or DEEPSEEK_API_KEY).strip()
+    if not key:
+        return None
+
+    user_prompt = "Transform the following input into a canonical Telegram post object.\n\n"
+    if primary_url:
+        user_prompt += f"PRIMARY URL: {primary_url}\n"
+    if category_hint and category_hint != "auto":
+        user_prompt += f"CATEGORY OVERRIDE: {category_hint}\n"
+    user_prompt += f"INPUT CONTENT:\n{content_corpus[:5000]}"
+
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": GEMINI_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.3,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(f"{base_url.rstrip('/')}/chat/completions", json=payload, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                return json.loads(content)
+    except Exception as e:
+        logger.warning(f"OpenAI-compatible LLM call failed: {e}")
+
+    return None
+
+
+# ─── 7. DETERMINISTIC COPYWRITING FALLBACK ────────────────────────────────────
+
+def _extract_job_details(text: str, source_name: str) -> Dict[str, str]:
+    """Extracts job-specific fields (company, role, location, skills, salary) from text."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    
+    # 1. Company
+    company = source_name
+    comp_match = re.search(r"(?:at|at the|by|with|joining)\s+([A-Z][A-Za-z0-9\s&.-]{1,25})\b", text)
+    if comp_match and comp_match.group(1).lower() not in ["the", "a", "an", "our", "this"]:
+        company = comp_match.group(1).strip()
+    elif source_name and source_name != "Official Source":
+        company = source_name
+
+    # 2. Location
+    location = "Remote / Hybrid"
+    loc_match = re.search(r"(?:location|based in|workplace)[:\-–—]?\s*([^\n,]+(?:,\s*[A-Z]{2})?)", text, re.I)
+    if loc_match:
+        location = loc_match.group(1).strip()
+    elif re.search(r"\bremote\b", text, re.I):
+        location = "Remote"
+    elif re.search(r"\bhybrid\b", text, re.I):
+        location = "Hybrid"
+
+    # 3. Experience
+    experience = "1-3+ Years or Relevant Experience"
+    exp_match = re.search(r"(\d+\+?\s*(?:-\s*\d+)?\s*(?:years?|yrs?)(?:\s+of\s+experience)?)", text, re.I)
+    if exp_match:
+        experience = exp_match.group(1).strip()
+    elif re.search(r"\bsenior\b|\bstaff\b|\blead\b", text, re.I):
+        experience = "4+ Years (Senior / Staff Level)"
+    elif re.search(r"\bintern\b|\bgraduate\b|\bentry\b", text, re.I):
+        experience = "Students / Recent Graduates"
+
+    # 4. Skills / Tech Stack
+    skills = []
+    common_skills = [
+        "Python", "PyTorch", "TensorFlow", "TypeScript", "React", "Node.js", "Go", "Golang",
+        "Rust", "C++", "Kubernetes", "AWS", "GCP", "PostgreSQL", "LLMs", "RAG", "Docker", "Next.js"
+    ]
+    for sk in common_skills:
+        if re.search(rf"\b{re.escape(sk)}\b", text, re.I):
+            skills.append(sk)
+    skills_str = ", ".join(skills[:5]) if skills else "Python, Distributed Systems, Modern Stack"
+
+    # 5. Compensation / Salary
+    compensation = "Competitive Industry Standard + Equity"
+    sal_match = re.search(r"((?:[$€£₹]|INR|USD)\s*[\d,]+(?:\s*-\s*[\d,]+)?(?:\s*(?:k|lpa|per year|/yr))?)", text, re.I)
+    if sal_match:
+        compensation = sal_match.group(1).strip()
+
+    return {
+        "company": company,
+        "location": location,
+        "experience": experience,
+        "skills": skills_str,
+        "compensation": compensation,
+    }
+
+
+def _build_deterministic_copy(
+    category: ContentType,
+    content_corpus: str,
+    source_name: str,
+    title_hint: str,
+    primary_url: Optional[str],
+) -> Dict[str, Any]:
+    """Generates structured, executive-grade copy when LLM is unavailable."""
+    body_lines = [l.strip() for l in content_corpus.splitlines() if l.strip() and not l.startswith("http")]
+
+    if category in (ContentType.JOB, ContentType.INTERNSHIP):
+        job_info = _extract_job_details(content_corpus, source_name)
+        role_title = _clean_title_core(title_hint)
+        if category == ContentType.INTERNSHIP:
+            title = f"🎓 {job_info['company']} is Hiring: {role_title}" if "intern" in role_title.lower() else f"🎓 {job_info['company']} {role_title} Internship"
+            hook = f"{job_info['company']} has opened applications for their {role_title} internship program."
+            details_header = "⚡ <b>INTERNSHIP DETAILS</b>"
+            why_header = "💡 <b>WHY APPLY</b>"
+            why_text = f"Accelerate your engineering journey with hands-on production experience at {job_info['company']}."
+            cta = "Review complete role requirements and apply directly via the link below."
+            btn_label = "🎓 Apply for Internship"
+        else:
+            title = f"💼 {job_info['company']} is Hiring: {role_title}"
+            hook = f"{job_info['company']} is actively expanding its team and looking for a {role_title}."
+            details_header = "⚡ <b>ROLE DETAILS</b>"
+            why_header = "💡 <b>WHY APPLY</b>"
+            why_text = f"Opportunity to work on frontier scalable architectures with top-tier engineering leadership at {job_info['company']}."
+            cta = "Review complete requirements and apply directly via the official link below."
+            btn_label = "💼 Apply Now"
+
+        body = (
+            f"{hook}\n\n"
+            f"{details_header}\n"
+            f"• <b>Company:</b> {job_info['company']}\n"
+            f"• <b>Location:</b> {job_info['location']}\n"
+            f"• <b>Experience:</b> {job_info['experience']}\n"
+            f"• <b>Key Skills:</b> {job_info['skills']}\n"
+            f"• <b>Compensation:</b> {job_info['compensation']}\n\n"
+            f"{why_header}\n"
+            f"{why_text}\n\n"
+            f"👉 <i>{cta}</i>"
+        )
+        takeaways = [
+            f"Company: {job_info['company']} | Location: {job_info['location']}",
+            f"Experience: {job_info['experience']}",
+            f"Tech Stack: {job_info['skills']}",
+            f"Compensation: {job_info['compensation']}",
+        ]
+        why_it_matters = why_text
+    else:
+        # AI News, Tools, GitHub, Hackathon
+        core_title = _clean_title_core(title_hint)
+        if category == ContentType.GITHUB:
+            title = f"💻 GitHub: {core_title}"
+            btn_label = "💻 View on GitHub"
+            why_it_matters = "Provides an open-source, extensible foundation eliminating the need to reinvent complex model pipelines."
+            cta = "Star the repository and explore the complete architecture guide below."
+        elif category == ContentType.AI_TOOL:
+            title = f"🛠 {core_title} — Next-Gen AI Tool"
+            btn_label = "🛠 Try Tool"
+            why_it_matters = "Streamlines developer friction and empowers engineers to build production applications faster."
+            cta = "Explore the live tool, documentation, and playground in the link below."
+        elif category == ContentType.HACKATHON:
+            title = f"🏆 {core_title} Hackathon Open"
+            btn_label = "🏆 Register Now"
+            why_it_matters = "High-visibility launchpad to build frontier AI products and connect directly with hiring leads."
+            cta = "Assemble your team and register before the deadline closes."
+        else:
+            title = f"🚀 {core_title}"
+            btn_label = "📚 Read Source"
+            why_it_matters = "Major technological milestone with direct implications for developers, researchers, and creators."
+            cta = "Check out the official release notes and technical benchmarks below."
+
+        opening = body_lines[1] if len(body_lines) > 1 and len(body_lines[1]) > 25 else (body_lines[0] if body_lines else f"A major development in {category.value.replace('_', ' ').title()} has been announced.")
+        
+        takeaways = []
+        if len(body_lines) >= 3:
+            for cand in body_lines[2:6]:
+                if 20 <= len(cand) <= 180 and not cand.startswith("#"):
+                    takeaways.append(cand.rstrip("."))
+                if len(takeaways) >= 3:
+                    break
+        if not takeaways:
+            takeaways = [
+                "Crosses leading performance benchmarks in practical developer workflows",
+                "Broad developer rollout beginning immediately with public access",
+            ]
+
+        takeaways_formatted = "\n".join(f"• {t}" for t in takeaways)
+        body = (
+            f"{opening}\n\n"
+            f"⚡ <b>KEY TAKEAWAYS</b>\n"
+            f"{takeaways_formatted}\n\n"
+            f"💡 <b>WHY IT MATTERS</b>\n"
+            f"{why_it_matters}\n\n"
+            f"👉 <i>{cta}</i>"
+        )
+        hook = opening
+
+    return {
+        "content_type": category.value,
+        "title": title,
+        "body": body,
+        "summary": hook,
+        "takeaways": takeaways,
+        "why_it_matters": why_it_matters,
+        "cta": cta,
+        "suggested_button_label": btn_label,
+        "hashtags": ["AI", "Tech", category.value.replace("_", "")],
+        "keywords": [source_name, category.value],
+    }
+
+
+# ─── 8. MASTER GENERATOR ORCHESTRATOR ─────────────────────────────────────────
 
 async def generate_post_from_input(
     raw_input: str,
     category_override: str = "auto",
     notes: str = "",
     link: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Master pipeline:
-    1. Detects input type (URL, raw text, rough idea, URL + notes).
-    2. Fetches URL server-side if present.
-    3. Auto-detects category with safety confidence check.
-    4. Generates 3 headline hooks and selects the best.
-    5. Extracts structured facts into PostSchema.
-    6. Runs quality analyzer and visual suggestion.
+    1. Extracts primary URL and scrapes metadata/content server-side.
+    2. Calls Gemini API (or OpenAI-compatible API) for elite copywriting.
+    3. Falls back gracefully to deterministic executive copywriter if offline.
+    4. Constructs canonical PostSchema with action buttons, like reaction button, and discuss button.
+    5. Runs Quality Analyzer & Visual concept suggestion.
     """
     clean_input = raw_input.strip()
     if not clean_input:
@@ -480,11 +837,11 @@ async def generate_post_from_input(
     else:
         input_type = "raw_text"
 
-    # Step 1: Scrape URL if present (graceful timeout / fallback)
+    # Step 1: Scrape URL if present
     url_data: Optional[Dict[str, Any]] = None
     if primary_url:
         try:
-            url_data = await fetch_and_clean_url(primary_url, timeout=4.0)
+            url_data = await fetch_and_clean_url(primary_url, timeout=4.5)
         except Exception as e:
             logger.warning(f"URL scraping unavailable for {primary_url}: {e}. Proceeding with user text.")
             url_data = None
@@ -505,163 +862,142 @@ async def generate_post_from_input(
 
     # Step 2: Detect category
     if category_override and category_override != "auto":
-        category = ContentType(category_override)
-        confidence = 1.0
-        review_needed = False
+        try:
+            category = ContentType(category_override)
+            confidence = 1.0
+            review_needed = False
+        except ValueError:
+            category, confidence, review_needed = detect_category(content_corpus, primary_url)
     else:
         category, confidence, review_needed = detect_category(content_corpus, primary_url)
 
-    # Step 3: 3-Hook Generation & Scoring
-    hooks = generate_hook_options(title_hint, content_corpus, category)
-    best_hook = hooks[0].text if hooks else title_hint
+    # Step 3: Generate copy via Gemini LLM (or Fallback Engine)
+    llm_result = None
+    active_key = (api_key or GEMINI_API_KEY).strip()
+    if active_key:
+        llm_result = await call_gemini_generator(
+            content_corpus=content_corpus,
+            primary_url=primary_url,
+            category_hint=category.value,
+            api_key=active_key,
+        )
 
-    # Step 4: Extract structured body & takeaways
-    # Build clean paragraph lines
-    body_lines = [l.strip() for l in content_corpus.splitlines() if l.strip() and not l.startswith("http")]
+    # Try OpenAI-compatible secondary if Gemini key not set but OpenAI is
+    if not llm_result and (OPENAI_API_KEY or OPENROUTER_API_KEY or DEEPSEEK_API_KEY):
+        llm_result = await call_openai_compatible_generator(
+            content_corpus=content_corpus,
+            primary_url=primary_url,
+            category_hint=category.value,
+            api_key=OPENAI_API_KEY or OPENROUTER_API_KEY or DEEPSEEK_API_KEY,
+            base_url=DEEPSEEK_BASE_URL if DEEPSEEK_API_KEY else "https://api.openai.com/v1",
+            model=LLM_MODEL_NAME,
+        )
 
-    # Opening summary (concise, curiosity-inducing without clickbait)
-    if len(body_lines) > 1 and len(body_lines[1]) > 30:
-        opening = body_lines[1]
-    elif len(body_lines) > 0 and len(body_lines[0]) > 30:
-        opening = body_lines[0]
+    # Use LLM output if valid, otherwise use deterministic copywriting engine
+    if llm_result and "title" in llm_result and "body" in llm_result:
+        post_title = llm_result.get("title", title_hint)
+        post_body = llm_result.get("body", "")
+        post_summary = llm_result.get("summary", post_title)
+        post_takeaways = llm_result.get("takeaways", [])
+        post_why_it_matters = llm_result.get("why_it_matters", "")
+        post_cta = llm_result.get("cta", "")
+        btn_label = llm_result.get("suggested_button_label", "")
+        hashtags = llm_result.get("hashtags", [])
+        keywords = llm_result.get("keywords", [])
+        
+        # Validate LLM content_type
+        llm_cat = llm_result.get("content_type", "")
+        try:
+            if llm_cat:
+                category = ContentType(llm_cat)
+        except ValueError:
+            pass
     else:
-        opening = f"A significant development in {category.value.replace('_', ' ').title()} has been introduced."
+        det_result = _build_deterministic_copy(
+            category=category,
+            content_corpus=content_corpus,
+            source_name=source_name,
+            title_hint=title_hint,
+            primary_url=primary_url,
+        )
+        post_title = det_result["title"]
+        post_body = det_result["body"]
+        post_summary = det_result["summary"]
+        post_takeaways = det_result["takeaways"]
+        post_why_it_matters = det_result["why_it_matters"]
+        post_cta = det_result["cta"]
+        btn_label = det_result["suggested_button_label"]
+        hashtags = det_result["hashtags"]
+        keywords = det_result["keywords"]
 
-    # Takeaways extraction
-    takeaways: List[str] = []
-    if len(body_lines) >= 3:
-        for candidate_line in body_lines[2:6]:
-            if 20 <= len(candidate_line) <= 180 and not candidate_line.startswith("#"):
-                clean_takeaway = candidate_line.rstrip(".")
-                takeaways.append(clean_takeaway)
-            if len(takeaways) >= 3:
-                break
-
-    if not takeaways:
-        if category == ContentType.JOB:
-            takeaways = [
-                "Full-time engineering position with scalable systems focus",
-                "Competitive industry compensation package and benefits",
-            ]
-        elif category == ContentType.INTERNSHIP:
-            takeaways = [
-                "Hands-on engineering mentorship with production models",
-                "Competitive monthly stipend and certificate of completion",
-            ]
-        elif category == ContentType.HACKATHON:
-            takeaways = [
-                "Compete for substantial prizes and mentor access",
-                "Open for developers, researchers, and creators worldwide",
-            ]
-        elif category == ContentType.AI_TOOL:
-            takeaways = [
-                "Streamlined developer API with low-latency execution",
-                "Generous free tier and open documentation available",
-            ]
-        else:
-            takeaways = [
-                "Crosses leading performance benchmarks in practical developer workflows",
-                "Broad developer rollout beginning immediately with public access",
-            ]
-
-    # Why It Matters
-    lower_corpus = content_corpus.lower()
-    if "multimodal" in lower_corpus or "video" in lower_corpus or "voice" in lower_corpus:
-        why_it_matters = "Accelerates the transition from text-based chatbots to real-time multimodal perception systems."
-    elif "billion" in lower_corpus or "scale" in lower_corpus or "million" in lower_corpus:
-        why_it_matters = "Marks a massive scale milestone reflecting accelerating real-world AI adoption."
-    elif "security" in lower_corpus or "safety" in lower_corpus:
-        why_it_matters = "Addresses critical reliability and alignment challenges in autonomous AI agent deployment."
-    elif category == ContentType.JOB or category == ContentType.INTERNSHIP:
-        why_it_matters = "Key opportunity to work on frontier production architectures and distributed systems."
-    elif category == ContentType.AI_TOOL:
-        why_it_matters = "Reduces engineering friction and empowers solo builders to ship production applications faster."
-    else:
-        why_it_matters = "Significant technical milestone with direct implications for engineers, researchers, and builders."
-
-    # CTA
-    if category in (ContentType.JOB, ContentType.INTERNSHIP):
-        cta = "Review requirements and apply directly via the official link below."
-    elif category == ContentType.HACKATHON:
-        cta = "Assemble your team and register before the submission window closes."
-    elif category == ContentType.AI_TOOL:
-        cta = "Explore the live tool, documentation, and pricing in the link below."
-    else:
-        cta = "Check out the official release notes and technical benchmarks below."
-
-    # Assemble structured body text with HTML formatting
-    takeaways_formatted = "\n".join(f"• {t}" for t in takeaways)
-    body = (
-        f"{opening}\n\n"
-        f"⚡ <b>KEY TAKEAWAYS</b>\n"
-        f"{takeaways_formatted}\n\n"
-        f"💡 <b>WHY IT MATTERS</b>\n"
-        f"{why_it_matters}\n\n"
-        f"{cta}"
-    )
-
-    # Buttons
+    # Step 4: Construct Buttons
     buttons: List[InlineButton] = []
     if primary_url:
-        if category == ContentType.JOB:
-            button_label = "💼 Apply Now"
-        elif category == ContentType.INTERNSHIP:
-            button_label = "🎓 Apply for Internship"
-        elif category == ContentType.HACKATHON:
-            button_label = "🏆 Register Now"
-        elif category == ContentType.AI_TOOL:
-            button_label = "🛠 Try Tool"
-        elif category == ContentType.CAREER:
-            button_label = "🚀 Read Guide"
-        elif category == ContentType.RESOURCE:
-            button_label = "📖 Access Resource"
-        else:
-            button_label = "📚 Read Source"
-        buttons.append(InlineButton(text=button_label, url=primary_url))
+        if not btn_label:
+            if category == ContentType.JOB:
+                btn_label = "💼 Apply Now"
+            elif category == ContentType.INTERNSHIP:
+                btn_label = "🎓 Apply for Internship"
+            elif category == ContentType.HACKATHON:
+                btn_label = "🏆 Register Now"
+            elif category == ContentType.GITHUB:
+                btn_label = "💻 View on GitHub"
+            elif category == ContentType.AI_TOOL:
+                btn_label = "🛠 Try Tool"
+            elif category == ContentType.CAREER:
+                btn_label = "🚀 Read Guide"
+            elif category == ContentType.RESOURCE:
+                btn_label = "📖 Access Resource"
+            else:
+                btn_label = "📚 Read Source"
+        buttons.append(InlineButton(text=btn_label, url=primary_url))
 
-    # Real callback-based like button (no dummy url)
+    # Real callback-based like button & discuss community button
     buttons.append(InlineButton(text="❤️ Like", callback_data="react_like"))
     buttons.append(InlineButton(text="💬 Discuss", url="https://t.me/heyaaashu"))
 
-    # Source Info
+    # Step 5: Source & Verification
     source_obj = SourceInfo(
         title=source_name,
         url=primary_url or "",
         published_at=url_data.get("published_at") if url_data else None,
     ) if primary_url else None
 
-    # Verification Info
     verification = VerificationInfo(
         status=VerificationStatus.VERIFIED if primary_url else VerificationStatus.NEEDS_VERIFICATION,
         sources=[primary_url] if primary_url else [],
         notes=f"Generated via Heyaaashu AI Engine ({input_type})",
     )
 
+    # Step 6: 3-Hook Options
+    hooks = generate_hook_options(post_title, content_corpus, category)
+
     # Assemble canonical PostSchema
     post = PostSchema(
         schema_version="1.0.0",
         content_type=category,
-        title=best_hook,
-        body=body,
-        summary=opening,
-        takeaways=takeaways,
-        why_it_matters=why_it_matters,
-        cta=cta,
+        title=post_title,
+        body=post_body,
+        summary=post_summary,
+        takeaways=post_takeaways,
+        why_it_matters=post_why_it_matters,
+        cta=post_cta,
         parse_mode=ParseMode.HTML,
         buttons=buttons,
         source=source_obj,
         verification=verification,
+        hashtags=hashtags,
+        keywords=keywords,
         metadata={
             "input_type": input_type,
             "generated_at": int(time.time()),
             "detected_category": category.value,
+            "llm_powered": bool(llm_result),
         },
     )
 
-    # Step 5: Run Quality Analyzer
+    # Step 7: Quality & Visual Suggestion
     quality = analyze_post_quality(post, has_source=bool(primary_url))
-
-    # Step 6: Visual Suggestion
     visual = suggest_visual_concept(post)
 
     generation_meta = {
@@ -672,6 +1008,7 @@ async def generate_post_from_input(
         "hooks": [h.model_dump() for h in hooks],
         "source_name": source_name,
         "primary_url": primary_url,
+        "llm_powered": bool(llm_result),
     }
 
     return {
