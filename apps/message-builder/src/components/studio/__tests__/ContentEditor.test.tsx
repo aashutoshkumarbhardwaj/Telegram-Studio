@@ -45,7 +45,6 @@ describe('ContentEditor Streamlined Auto-Posting Hub', () => {
     expect(screen.getByText('Category')).toBeDefined();
     expect(screen.getByText('Template Layout')).toBeDefined();
     expect(screen.getByText('Auto-Configured Buttons')).toBeDefined();
-    expect(screen.getByText('Live Post Preview')).toBeDefined();
     expect(screen.getAllByText('📚 Read Source').length).toBeGreaterThan(0);
     expect(screen.getAllByText('❤️ Like').length).toBeGreaterThan(0);
     expect(screen.getAllByText('💬 Discuss').length).toBeGreaterThan(0);

@@ -77,17 +77,36 @@ class VisualConcept(BaseModel):
     concept: str
 
 
-# ─── 1. URL SCRAPING & CLEANING ───────────────────────────────────────────────
+EMAIL_REGEX = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
+
 
 def extract_urls(text: str) -> List[str]:
     """Finds all HTTP/HTTPS URLs in text."""
     return re.findall(r"https?://[^\s<>\"']+", text)
 
 
-async def fetch_and_clean_url(url: str, timeout: float = 5.0) -> Dict[str, Any]:
+def extract_emails(text: str) -> List[str]:
+    """Finds all email addresses in text."""
+    if not text:
+        return []
+    matches = re.findall(EMAIL_REGEX, text)
+    return list(dict.fromkeys(matches))
+
+
+def get_email_compose_url(email: str, subject: Optional[str] = None) -> str:
+    """Generates direct Gmail compose URL targeting the email in To section."""
+    import urllib.parse
+    clean_email = email.strip()
+    url = f"https://mail.google.com/mail/?view=cm&fs=1&to={urllib.parse.quote(clean_email)}"
+    if subject:
+        url += f"&su={urllib.parse.quote(subject)}"
+    return url
+
+
+async def fetch_and_clean_url(url: str, timeout: float = 2.0) -> Dict[str, Any]:
     """
-    Fetches URL server-side, extracts metadata, strips boilerplate/navigation,
-    and returns cleaned article text and source attribution.
+    Ultra-fast async web scraper. Fetches page content, strips HTML boilerplate,
+    and returns cleaned article text and source attribution within 2.0s.
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 (HeyaaashuStudio/1.0)",
@@ -825,6 +844,14 @@ async def generate_post_from_input(
         urls.insert(0, link.strip())
     has_url = len(urls) > 0
     primary_url = urls[0] if has_url else None
+    source_name = "Official Source"
+
+    # Detect emails in input
+    found_emails = extract_emails(clean_input)
+    if not primary_url and found_emails:
+        primary_email = found_emails[0]
+        primary_url = get_email_compose_url(primary_email)
+        source_name = f"Email: {primary_email}"
 
     # Determine input type
     text_without_urls = re.sub(r"https?://\S+", "", clean_input).strip()
@@ -837,11 +864,11 @@ async def generate_post_from_input(
     else:
         input_type = "raw_text"
 
-    # Step 1: Scrape URL if present
+    # Step 1: Scrape URL if present (skip if primary_url is mail compose)
     url_data: Optional[Dict[str, Any]] = None
-    if primary_url:
+    if primary_url and "mail.google.com" not in primary_url:
         try:
-            url_data = await fetch_and_clean_url(primary_url, timeout=4.5)
+            url_data = await fetch_and_clean_url(primary_url, timeout=2.0)
         except Exception as e:
             logger.warning(f"URL scraping unavailable for {primary_url}: {e}. Proceeding with user text.")
             url_data = None
@@ -852,10 +879,14 @@ async def generate_post_from_input(
         source_name = url_data["site_name"]
         content_corpus = f"{url_data['title']}\n\n{notes}\n\n{url_data['text']}"
     else:
-        source_name = "Official Source"
-        if primary_url:
-            domain_match = re.search(r"https?://(?:www\.)?([^/]+)", primary_url)
-            source_name = domain_match.group(1).capitalize() if domain_match else "Official Source"
+        if not source_name or source_name == "Official Source":
+            if primary_url and "mail.google.com" not in primary_url:
+                domain_match = re.search(r"https?://(?:www\.)?([^/]+)", primary_url)
+                source_name = domain_match.group(1).capitalize() if domain_match else "Official Source"
+            elif found_emails:
+                source_name = f"Email: {found_emails[0]}"
+            else:
+                source_name = "Official Source"
         lines = [l.strip() for l in (text_without_urls or clean_input).splitlines() if l.strip()]
         title_hint = lines[0] if lines else f"{source_name} Update"
         content_corpus = f"{clean_input}\n\n{notes}" if notes else clean_input
@@ -880,6 +911,7 @@ async def generate_post_from_input(
             primary_url=primary_url,
             category_hint=category.value,
             api_key=active_key,
+            timeout=3.5,
         )
 
     # Try OpenAI-compatible secondary if Gemini key not set but OpenAI is
@@ -891,6 +923,7 @@ async def generate_post_from_input(
             api_key=OPENAI_API_KEY or OPENROUTER_API_KEY or DEEPSEEK_API_KEY,
             base_url=DEEPSEEK_BASE_URL if DEEPSEEK_API_KEY else "https://api.openai.com/v1",
             model=LLM_MODEL_NAME,
+            timeout=3.5,
         )
 
     # Use LLM output if valid, otherwise use deterministic copywriting engine
@@ -930,11 +963,30 @@ async def generate_post_from_input(
         hashtags = det_result["hashtags"]
         keywords = det_result["keywords"]
 
+    # Hyperlink any email addresses in post_body to direct Gmail compose URL
+    if found_emails:
+        for em in found_emails:
+            gmail_link = get_email_compose_url(em)
+            if f'href="{gmail_link}"' not in post_body:
+                post_body = re.sub(
+                    rf'(?<![a-zA-Z0-9_.+-])({re.escape(em)})(?![^<]*>)',
+                    rf'<a href="{gmail_link}">{em}</a>',
+                    post_body
+                )
+
     # Step 4: Construct Buttons
     buttons: List[InlineButton] = []
     if primary_url:
+        is_email_url = "mail.google.com" in primary_url or primary_url.startswith("mailto:")
         if not btn_label:
-            if category == ContentType.JOB:
+            if is_email_url:
+                if category == ContentType.JOB:
+                    btn_label = "📩 Apply via Email"
+                elif category == ContentType.INTERNSHIP:
+                    btn_label = "🎓 Email Resume"
+                else:
+                    btn_label = "✉️ Send Email"
+            elif category == ContentType.JOB:
                 btn_label = "💼 Apply Now"
             elif category == ContentType.INTERNSHIP:
                 btn_label = "🎓 Apply for Internship"
@@ -951,6 +1003,13 @@ async def generate_post_from_input(
             else:
                 btn_label = "📚 Read Source"
         buttons.append(InlineButton(text=btn_label, url=primary_url))
+
+    # If primary was a web URL and an email was also found, add secondary email button
+    if found_emails and primary_url and "mail.google.com" not in primary_url and not primary_url.startswith("mailto:"):
+        email_to_use = found_emails[0]
+        email_url = get_email_compose_url(email_to_use)
+        email_btn_label = "📩 Email Resume" if category in (ContentType.JOB, ContentType.INTERNSHIP) else "✉️ Send Email"
+        buttons.append(InlineButton(text=email_btn_label, url=email_url))
 
     # Real callback-based like button & discuss community button
     buttons.append(InlineButton(text="❤️ Like", callback_data="react_like"))

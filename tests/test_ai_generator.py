@@ -287,3 +287,20 @@ async def test_empty_input_rejected(tmp_path):
     finally:
         await client.close()
 
+
+@pytest.mark.asyncio
+async def test_email_auto_redirect_to_gmail():
+    from packages.ai.generator import generate_post_from_input
+    sample_text = "Hiring Senior Python Engineers at Acme Corp! Send your CV to careers@acmewideworld.com with salary expectations."
+    res = await generate_post_from_input(sample_text, category_override="job")
+    post = res["post"]
+    
+    # Primary button should redirect to Gmail compose with To field filled
+    assert post["buttons"] is not None
+    assert len(post["buttons"]) >= 1
+    primary_btn = post["buttons"][0]
+    assert "mail.google.com/mail" in primary_btn["url"]
+    assert "to=careers%40acmewideworld.com" in primary_btn["url"] or "to=careers@acmewideworld.com" in primary_btn["url"]
+    assert "Apply" in primary_btn["text"] or "Email" in primary_btn["text"]
+
+

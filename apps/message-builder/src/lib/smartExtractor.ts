@@ -7,12 +7,28 @@
 import { ContentType, InlineButton, MediaItem, ParseMode, PostSchema, SourceInfo, VerificationInfo } from '@/types/postSchema';
 
 const URL_REGEX = /https?:\/\/[^\s<>"'{}|\\^`[\]]+/g;
+const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const IMAGE_URL_REGEX = /https?:\/\/[^\s<>"'{}|\\^`[\]]+\.(?:png|jpe?g|webp|gif|svg)(?:\?[^\s<>"'{}|\\^`[\]]*)?/i;
 
 export function extractUrls(text: string): string[] {
   if (!text) return [];
   const matches = text.match(URL_REGEX);
   return matches ? Array.from(new Set(matches)) : [];
+}
+
+export function extractEmails(text: string): string[] {
+  if (!text) return [];
+  const matches = text.match(EMAIL_REGEX);
+  return matches ? Array.from(new Set(matches)) : [];
+}
+
+export function getEmailComposeUrl(email: string, subject?: string): string {
+  const cleanEmail = email.trim();
+  let url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(cleanEmail)}`;
+  if (subject) {
+    url += `&su=${encodeURIComponent(subject)}`;
+  }
+  return url;
 }
 
 export function extractImageUrl(text: string): string | null {
@@ -276,11 +292,12 @@ export function extractCta(category: ContentType, hasLink: boolean): string {
 }
 
 /**
- * Hyperlinks standalone URLs in text into clean HTML <a> tags without altering existing tags.
+ * Hyperlinks standalone URLs and Email addresses in text into clean HTML <a> tags.
  */
 export function hyperlinkUrls(text: string): string {
   if (!text) return '';
-  return text.replace(/(https?:\/\/[^\s<>"'{}|\\^`[\]]+)/g, (url) => {
+  // 1. Hyperlink standalone URLs
+  let res = text.replace(/(https?:\/\/[^\s<>"'{}|\\^`[\]]+)/g, (url) => {
     let label = url;
     try {
       const parsed = new URL(url);
@@ -290,6 +307,13 @@ export function hyperlinkUrls(text: string): string {
     }
     return `<a href="${url}">${label}</a>`;
   });
+
+  // 2. Hyperlink standalone Email addresses to direct Gmail compose URL
+  res = res.replace(/(?<![a-zA-Z0-9._%+-])([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?![^<]*>)/g, (email) => {
+    return `<a href="${getEmailComposeUrl(email)}">${email}</a>`;
+  });
+
+  return res;
 }
 
 /**
@@ -345,7 +369,7 @@ export function formatRawContent(rawText: string, title: string, category: Conte
       continue;
     }
 
-    // Regular paragraph line with hyperlinked URLs
+    // Regular paragraph line with hyperlinked URLs and emails
     formattedLines.push(hyperlinkUrls(trimmed));
   }
 
@@ -360,47 +384,64 @@ export function formatRawContent(rawText: string, title: string, category: Conte
 export function buildButtons(
   primaryUrl: string | undefined,
   category: ContentType,
-  allUrls: string[] = []
+  allUrls: string[] = [],
+  allEmails: string[] = []
 ): InlineButton[] {
   const buttons: InlineButton[] = [];
 
-  // 1. Primary Action Button
+  // 1. Primary Action Button (Web URL or direct Gmail compose link)
   if (primaryUrl && primaryUrl.trim()) {
     const cleanUrl = primaryUrl.trim();
     let label = '📚 Read Source';
-    switch (category) {
-      case 'job':
-        label = '💼 Apply Now';
-        break;
-      case 'internship':
-        label = '🎓 Apply for Internship';
-        break;
-      case 'hackathon':
-        label = '🏆 Register Now';
-        break;
-      case 'ai_tool':
-        label = '🛠 Try Tool';
-        break;
-      case 'github':
-        label = '💻 View on GitHub';
-        break;
-      case 'resource':
-        label = '📖 Access Resource';
-        break;
-      case 'career':
-        label = '🚀 Read Guide';
-        break;
-      default:
-        label = '📚 Read Source';
+    const isEmailUrl = cleanUrl.includes('mail.google.com') || cleanUrl.startsWith('mailto:');
+
+    if (isEmailUrl) {
+      if (category === 'job') label = '📩 Apply via Email';
+      else if (category === 'internship') label = '🎓 Email Resume';
+      else label = '✉️ Send Email';
+    } else {
+      switch (category) {
+        case 'job':
+          label = '💼 Apply Now';
+          break;
+        case 'internship':
+          label = '🎓 Apply for Internship';
+          break;
+        case 'hackathon':
+          label = '🏆 Register Now';
+          break;
+        case 'ai_tool':
+          label = '🛠 Try Tool';
+          break;
+        case 'github':
+          label = '💻 View on GitHub';
+          break;
+        case 'resource':
+          label = '📖 Access Resource';
+          break;
+        case 'career':
+          label = '🚀 Read Guide';
+          break;
+        default:
+          label = '📚 Read Source';
+      }
     }
     buttons.push({ text: label, url: cleanUrl });
   }
 
-  // 2. Secondary Link Button if multiple URLs exist
-  const secondaryUrl = allUrls.find((u) => u !== primaryUrl);
-  if (secondaryUrl) {
-    const secTitle = getDomainSourceTitle(secondaryUrl);
-    buttons.push({ text: `🔗 ${secTitle}`, url: secondaryUrl });
+  // 2. Secondary Link: Email button if primary was web URL and email was found
+  if (allEmails.length > 0 && primaryUrl && !primaryUrl.includes('mail.google.com') && !primaryUrl.startsWith('mailto:')) {
+    const email = allEmails[0];
+    const emailUrl = getEmailComposeUrl(email);
+    const emailLabel = category === 'job' || category === 'internship' ? '📩 Email Resume' : '✉️ Send Email';
+    buttons.push({ text: emailLabel, url: emailUrl });
+  } else {
+    // Secondary Link Button if multiple URLs exist
+    const secondaryUrl = allUrls.find((u) => u !== primaryUrl && !u.includes('mail.google.com'));
+    if (secondaryUrl) {
+      const secTitle = getDomainSourceTitle(secondaryUrl);
+      buttons.push({ text: `🔗 ${secTitle}`, url: secondaryUrl });
+    }
   }
 
   // 3. Auto-configured Like / React action button (real callback, no dummy link!)
@@ -430,16 +471,22 @@ export function smartExtractPost(rawText: string, options: SmartExtractOptions =
   const text = (rawText || '').trim();
   const explicitLink = options.explicitLink?.trim() || '';
 
-  // 1. Detect all URLs and identify primary URL
+  // 1. Detect all URLs, Emails and identify primary URL
   const foundUrls = extractUrls(text);
+  const foundEmails = extractEmails(text);
   const detectedImageUrl = extractImageUrl(text);
 
   let primaryUrl = explicitLink;
-  if (!primaryUrl && foundUrls.length > 0) {
-    if (foundUrls.length === 1 && detectedImageUrl && foundUrls[0] === detectedImageUrl) {
-      primaryUrl = '';
-    } else {
-      primaryUrl = foundUrls.find((u) => u !== detectedImageUrl) || foundUrls[0];
+  if (!primaryUrl) {
+    if (foundUrls.length > 0) {
+      if (foundUrls.length === 1 && detectedImageUrl && foundUrls[0] === detectedImageUrl) {
+        primaryUrl = '';
+      } else {
+        primaryUrl = foundUrls.find((u) => u !== detectedImageUrl) || foundUrls[0];
+      }
+    } else if (foundEmails.length > 0) {
+      // Direct Gmail compose link when only email ID is present
+      primaryUrl = getEmailComposeUrl(foundEmails[0]);
     }
   }
 
@@ -483,11 +530,16 @@ export function smartExtractPost(rawText: string, options: SmartExtractOptions =
   const formattedBody = formatRawContent(text, title, category, primaryUrl);
   const body = formattedBody || `${summary}\n\n⚡ <b>KEY TAKEAWAYS</b>\n${takeaways.map((t) => `• ${t}`).join('\n')}\n\n${cta}`;
 
-  // 10. Buttons (includes primary link, secondary link if present, Like action button, and Discuss)
-  const buttons = buildButtons(primaryUrl, category, foundUrls);
+  // 10. Buttons (includes primary link/email, secondary link if present, Like action button, and Discuss)
+  const buttons = buildButtons(primaryUrl, category, foundUrls, foundEmails);
 
   // 11. Source & Verification
-  const sourceTitle = primaryUrl ? getDomainSourceTitle(primaryUrl) : 'Official Announcement';
+  const sourceTitle = primaryUrl
+    ? primaryUrl.includes('mail.google.com')
+      ? `Email: ${foundEmails[0] || 'Direct Contact'}`
+      : getDomainSourceTitle(primaryUrl)
+    : 'Official Announcement';
+
   const source: SourceInfo | undefined = primaryUrl
     ? {
         title: sourceTitle,

@@ -185,5 +185,19 @@ Competitive salary $220k - $280k + equity.`;
       expect(post.buttons?.[0].url).toBe(explicitLink);
       expect(post.buttons?.[1].text).toBe('❤️ Like');
     });
+
+    it('automatically generates a Gmail compose action button when email is found without web link', () => {
+      const raw = `Frontend Engineer Opening at TechStudio!
+Send your resume and portfolio to careers@techstudio.dev for immediate consideration.`;
+
+      const post = smartExtractPost(raw);
+
+      expect(post.content_type).toBe('job');
+      expect(post.buttons).toBeDefined();
+      expect(post.buttons?.[0].text).toBe('📩 Apply via Email');
+      expect(post.buttons?.[0].url).toBe('https://mail.google.com/mail/?view=cm&fs=1&to=careers%40techstudio.dev');
+      expect(post.body).toContain('href="https://mail.google.com/mail/?view=cm&fs=1&to=careers%40techstudio.dev"');
+    });
   });
 });
+

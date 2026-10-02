@@ -365,11 +365,11 @@ export const StudioLayout: React.FC = () => {
         isPublishing={isPublishing}
       />
 
-      {/* Main Workspace: Desktop 3-Column Resizable Layout */}
+      {/* Main Workspace: Desktop 2-Column Resizable Layout */}
       <div className="flex-1 w-full hidden md:block overflow-hidden">
         <ResizablePanelGroup direction="horizontal">
           {/* Left Panel: Content Editor */}
-          <ResizablePanel defaultSize={32} minSize={25} maxSize={45} className="bg-card/30 backdrop-blur-md border-r border-border/60">
+          <ResizablePanel defaultSize={50} minSize={35} maxSize={65} className="bg-card/30 backdrop-blur-md border-r border-border/60">
             <div className="h-full overflow-y-auto">
               <ContentEditor
                 post={post}
@@ -385,20 +385,20 @@ export const StudioLayout: React.FC = () => {
 
           <ResizableHandle withHandle />
 
-          {/* Center Canvas: Live Telegram Preview */}
-          <ResizablePanel defaultSize={44} minSize={30} className="bg-transparent flex flex-col">
+          {/* Right Canvas: Live Telegram Preview */}
+          <ResizablePanel defaultSize={50} minSize={35} className="bg-transparent flex flex-col">
             <div className="flex-1 overflow-y-auto p-4 flex items-center justify-center">
               <TelegramPreview
                 post={post}
                 templateStyle={templateStyle}
                 onPostChange={handlePostChange}
+                onPublishClick={() => setIsPublishModalOpen(true)}
               />
             </div>
           </ResizablePanel>
 
+          {/* Settings & Quality Health Panel (Commented out for clean uncluttered production UI)
           <ResizableHandle withHandle />
-
-          {/* Right Panel: Settings & Quality Health */}
           <ResizablePanel defaultSize={24} minSize={20} maxSize={35} className="bg-card/30 backdrop-blur-md border-l border-border/60">
             <div className="h-full overflow-y-auto">
               <SettingsPanel
@@ -410,6 +410,7 @@ export const StudioLayout: React.FC = () => {
               />
             </div>
           </ResizablePanel>
+          */}
         </ResizablePanelGroup>
       </div>
 
@@ -441,18 +442,6 @@ export const StudioLayout: React.FC = () => {
               />
             </div>
           )}
-
-          {activeMobileTab === 'settings' && (
-            <div className="max-w-xl mx-auto">
-              <SettingsPanel
-                post={post}
-                templateStyle={templateStyle}
-                quality={qualityMetrics}
-                hooks={hookOptions}
-                onSelectHook={(h) => handlePostChange((p) => ({ ...p, title: h }))}
-              />
-            </div>
-          )}
         </div>
 
         {/* Mobile Sticky Bottom Floating Action Bar */}
@@ -462,7 +451,7 @@ export const StudioLayout: React.FC = () => {
             <button
               type="button"
               onClick={() => setActiveMobileTab('edit')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                 activeMobileTab === 'edit'
                   ? 'bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-300 border border-cyan-500/50 shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -473,29 +462,13 @@ export const StudioLayout: React.FC = () => {
             <button
               type="button"
               onClick={() => setActiveMobileTab('preview')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                 activeMobileTab === 'preview'
                   ? 'bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-300 border border-cyan-500/50 shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
               👁 Preview
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveMobileTab('settings')}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                activeMobileTab === 'settings'
-                  ? 'bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-cyan-300 border border-cyan-500/50 shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <span>⚙️</span>
-              {qualityMetrics && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono font-bold">
-                  {qualityMetrics.overall}
-                </span>
-              )}
             </button>
           </div>
 
