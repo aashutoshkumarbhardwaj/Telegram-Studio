@@ -40,29 +40,40 @@ class StudioDatabase:
         if self.is_postgres:
             if self.database_url.startswith("postgres://"):
                 self.database_url = "postgresql://" + self.database_url[len("postgres://"):]
-            logger.info("StudioDatabase initialized with PostgreSQL backend.")
+            logger.info(f"StudioDatabase configured with PostgreSQL backend.")
         else:
-            try:
-                Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                fallback_path = Path(__file__).resolve().parent.parent.parent / "data" / "studio.db"
-                fallback_path.parent.mkdir(parents=True, exist_ok=True)
-                self.db_path = str(fallback_path)
+            self._ensure_sqlite_path()
             logger.info(f"StudioDatabase initialized with SQLite backend at {self.db_path}")
 
         self.init_db()
+
+    def _ensure_sqlite_path(self):
+        try:
+            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            fallback_path = Path(__file__).resolve().parent.parent.parent / "data" / "studio.db"
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            self.db_path = str(fallback_path)
 
     @contextmanager
     def get_connection(self) -> Generator[Any, None, None]:
         if self.is_postgres:
             if not psycopg:
                 raise RuntimeError("psycopg is not installed. Install psycopg[binary] to use PostgreSQL.")
-            conn = psycopg.connect(self.database_url, autocommit=True, row_factory=dict_row)
+            try:
+                conn = psycopg.connect(self.database_url, autocommit=True, row_factory=dict_row)
+            except Exception as e:
+                logger.error(f"⚠️ PostgreSQL connection failed ({e}). Falling back to SQLite backend.")
+                self.is_postgres = False
+                self._ensure_sqlite_path()
+                conn = sqlite3.connect(self.db_path)
+                conn.row_factory = sqlite3.Row
             try:
                 yield conn
             finally:
                 conn.close()
         else:
+            self._ensure_sqlite_path()
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
@@ -72,224 +83,234 @@ class StudioDatabase:
 
     def init_db(self):
         """Initializes tables and migrations for SQLite or PostgreSQL."""
+        if self.is_postgres:
+            try:
+                with self.get_connection() as conn:
+                    if not self.is_postgres:
+                        raise RuntimeError("Fell back to SQLite during connection attempt")
+                    cursor = conn.cursor()
+                    # PostgreSQL DDL
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS users (
+                            user_id BIGINT PRIMARY KEY,
+                            username TEXT,
+                            first_name TEXT,
+                            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS channels (
+                            channel_id BIGINT PRIMARY KEY,
+                            title TEXT,
+                            username TEXT,
+                            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS user_channels (
+                            user_id BIGINT,
+                            channel_id BIGINT,
+                            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                            PRIMARY KEY (user_id, channel_id)
+                        );
+                    """)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS posts (
+                            post_id SERIAL PRIMARY KEY,
+                            user_id BIGINT,
+                            channel_id BIGINT,
+                            content_type TEXT,
+                            title TEXT,
+                            text TEXT,
+                            media_json TEXT,
+                            buttons_json TEXT,
+                            reactions_json TEXT,
+                            source_json TEXT,
+                            parse_mode TEXT DEFAULT 'HTML',
+                            status TEXT DEFAULT 'draft',
+                            raw_schema_json TEXT,
+                            scheduled_at TIMESTAMPTZ,
+                            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                            published_at TIMESTAMPTZ,
+                            telegram_message_id BIGINT,
+                            error_message TEXT,
+                            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    for col_name, col_type in [
+                        ("telegram_message_id", "BIGINT"),
+                        ("error_message", "TEXT"),
+                        ("updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
+                        ("scheduled_at", "TIMESTAMPTZ"),
+                    ]:
+                        try:
+                            cursor.execute(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+                        except Exception:
+                            pass
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS sent_posts (
+                            channel_id BIGINT,
+                            message_id BIGINT,
+                            post_id INTEGER,
+                            PRIMARY KEY (channel_id, message_id)
+                        );
+                    """)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS votes (
+                            post_id INTEGER,
+                            user_id BIGINT,
+                            reaction TEXT,
+                            PRIMARY KEY (post_id, user_id)
+                        );
+                    """)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS research_cache (
+                            candidate_id TEXT PRIMARY KEY,
+                            category TEXT,
+                            title TEXT,
+                            summary TEXT,
+                            source_url TEXT,
+                            source_name TEXT,
+                            trust_tier INTEGER DEFAULT 2,
+                            verification_status TEXT DEFAULT 'verified',
+                            supporting_sources_json TEXT,
+                            metadata_json TEXT,
+                            score REAL DEFAULT 1.0,
+                            published_at TEXT,
+                            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS surfaced_stories (
+                            url_hash TEXT PRIMARY KEY,
+                            url TEXT,
+                            title TEXT,
+                            category TEXT,
+                            surfaced_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                logger.info("✅ PostgreSQL database schema verified and initialized.")
+                return
+            except Exception as e:
+                logger.warning(f"⚠️ PostgreSQL connection/initialization failed ({e}). Gracefully falling back to local SQLite backend.")
+                self.is_postgres = False
+
+        # SQLite DDL
+        self._ensure_sqlite_path()
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS channels (
+                    channel_id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    username TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_channels (
+                    user_id INTEGER,
+                    channel_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, channel_id)
+                );
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS posts (
+                    post_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    channel_id INTEGER,
+                    content_type TEXT,
+                    title TEXT,
+                    text TEXT,
+                    media_json TEXT,
+                    buttons_json TEXT,
+                    reactions_json TEXT,
+                    source_json TEXT,
+                    parse_mode TEXT DEFAULT 'HTML',
+                    status TEXT DEFAULT 'draft',
+                    raw_schema_json TEXT,
+                    scheduled_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    published_at TIMESTAMP,
+                    telegram_message_id INTEGER,
+                    error_message TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sent_posts (
+                    channel_id INTEGER,
+                    message_id INTEGER,
+                    post_id INTEGER,
+                    PRIMARY KEY (channel_id, message_id)
+                );
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS votes (
+                    post_id INTEGER,
+                    user_id INTEGER,
+                    reaction TEXT,
+                    PRIMARY KEY (post_id, user_id)
+                );
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS research_cache (
+                    candidate_id TEXT PRIMARY KEY,
+                    category TEXT,
+                    title TEXT,
+                    summary TEXT,
+                    source_url TEXT,
+                    source_name TEXT,
+                    trust_tier INTEGER DEFAULT 2,
+                    verification_status TEXT DEFAULT 'verified',
+                    supporting_sources_json TEXT,
+                    metadata_json TEXT,
+                    score REAL DEFAULT 1.0,
+                    published_at TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS surfaced_stories (
+                    url_hash TEXT PRIMARY KEY,
+                    url TEXT,
+                    title TEXT,
+                    category TEXT,
+                    surfaced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
-            if self.is_postgres:
-                # PostgreSQL DDL
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        user_id BIGINT PRIMARY KEY,
-                        username TEXT,
-                        first_name TEXT,
-                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS channels (
-                        channel_id BIGINT PRIMARY KEY,
-                        title TEXT,
-                        username TEXT,
-                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS user_channels (
-                        user_id BIGINT,
-                        channel_id BIGINT,
-                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (user_id, channel_id)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS posts (
-                        post_id SERIAL PRIMARY KEY,
-                        user_id BIGINT,
-                        channel_id BIGINT,
-                        content_type TEXT,
-                        title TEXT,
-                        text TEXT,
-                        media_json TEXT,
-                        buttons_json TEXT,
-                        reactions_json TEXT,
-                        source_json TEXT,
-                        parse_mode TEXT DEFAULT 'HTML',
-                        status TEXT DEFAULT 'draft',
-                        raw_schema_json TEXT,
-                        scheduled_at TIMESTAMPTZ,
-                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                        published_at TIMESTAMPTZ,
-                        telegram_message_id BIGINT,
-                        error_message TEXT,
-                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                for col_name, col_type in [
-                    ("telegram_message_id", "BIGINT"),
-                    ("error_message", "TEXT"),
-                    ("updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
-                    ("scheduled_at", "TIMESTAMPTZ"),
-                ]:
-                    try:
-                        cursor.execute(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
-                    except Exception:
-                        pass
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS sent_posts (
-                        channel_id BIGINT,
-                        message_id BIGINT,
-                        post_id INTEGER,
-                        PRIMARY KEY (channel_id, message_id)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS votes (
-                        post_id INTEGER,
-                        user_id BIGINT,
-                        reaction TEXT,
-                        PRIMARY KEY (post_id, user_id)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS research_cache (
-                        candidate_id TEXT PRIMARY KEY,
-                        category TEXT,
-                        title TEXT,
-                        summary TEXT,
-                        source_url TEXT,
-                        source_name TEXT,
-                        trust_tier INTEGER DEFAULT 2,
-                        verification_status TEXT DEFAULT 'verified',
-                        supporting_sources_json TEXT,
-                        metadata_json TEXT,
-                        score REAL DEFAULT 1.0,
-                        published_at TEXT,
-                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS surfaced_stories (
-                        url_hash TEXT PRIMARY KEY,
-                        url TEXT,
-                        title TEXT,
-                        category TEXT,
-                        surfaced_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-            else:
-                # SQLite DDL
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        user_id INTEGER PRIMARY KEY,
-                        username TEXT,
-                        first_name TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS channels (
-                        channel_id INTEGER PRIMARY KEY,
-                        title TEXT,
-                        username TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS user_channels (
-                        user_id INTEGER,
-                        channel_id INTEGER,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (user_id, channel_id)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS posts (
-                        post_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER,
-                        channel_id INTEGER,
-                        content_type TEXT,
-                        title TEXT,
-                        text TEXT,
-                        media_json TEXT,
-                        buttons_json TEXT,
-                        reactions_json TEXT,
-                        source_json TEXT,
-                        parse_mode TEXT DEFAULT 'HTML',
-                        status TEXT DEFAULT 'draft',
-                        raw_schema_json TEXT,
-                        scheduled_at TIMESTAMP,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        published_at TIMESTAMP,
-                        telegram_message_id INTEGER,
-                        error_message TEXT,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS sent_posts (
-                        channel_id INTEGER,
-                        message_id INTEGER,
-                        post_id INTEGER,
-                        PRIMARY KEY (channel_id, message_id)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS votes (
-                        post_id INTEGER,
-                        user_id INTEGER,
-                        reaction TEXT,
-                        PRIMARY KEY (post_id, user_id)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS research_cache (
-                        candidate_id TEXT PRIMARY KEY,
-                        category TEXT,
-                        title TEXT,
-                        summary TEXT,
-                        source_url TEXT,
-                        source_name TEXT,
-                        trust_tier INTEGER DEFAULT 2,
-                        verification_status TEXT DEFAULT 'verified',
-                        supporting_sources_json TEXT,
-                        metadata_json TEXT,
-                        score REAL DEFAULT 1.0,
-                        published_at TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS surfaced_stories (
-                        url_hash TEXT PRIMARY KEY,
-                        url TEXT,
-                        title TEXT,
-                        category TEXT,
-                        surfaced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-
-                # Migrations for existing SQLite stores
-                migrations = [
-                    ("title", "TEXT"),
-                    ("media_json", "TEXT"),
-                    ("buttons_json", "TEXT"),
-                    ("reactions_json", "TEXT"),
-                    ("source_json", "TEXT"),
-                    ("parse_mode", "TEXT DEFAULT 'HTML'"),
-                    ("raw_schema_json", "TEXT"),
-                    ("status", "TEXT DEFAULT 'draft'"),
-                    ("scheduled_at", "TIMESTAMP"),
-                    ("published_at", "TIMESTAMP"),
-                    ("telegram_message_id", "INTEGER"),
-                    ("error_message", "TEXT"),
-                    ("updated_at", "TIMESTAMP"),
-                ]
-                for col_name, col_type in migrations:
-                    try:
-                        cursor.execute(f"ALTER TABLE posts ADD COLUMN {col_name} {col_type}")
-                    except sqlite3.OperationalError:
-                        pass
-                conn.commit()
+            # Migrations for existing SQLite stores
+            migrations = [
+                ("title", "TEXT"),
+                ("media_json", "TEXT"),
+                ("buttons_json", "TEXT"),
+                ("reactions_json", "TEXT"),
+                ("source_json", "TEXT"),
+                ("parse_mode", "TEXT DEFAULT 'HTML'"),
+                ("raw_schema_json", "TEXT"),
+                ("status", "TEXT DEFAULT 'draft'"),
+                ("scheduled_at", "TIMESTAMP"),
+                ("published_at", "TIMESTAMP"),
+                ("telegram_message_id", "INTEGER"),
+                ("error_message", "TEXT"),
+                ("updated_at", "TIMESTAMP"),
+            ]
+            for col_name, col_type in migrations:
+                try:
+                    cursor.execute(f"ALTER TABLE posts ADD COLUMN {col_name} {col_type}")
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
 
     def save_draft(self, user_id: int, post: PostSchema, channel_id: Optional[int] = None, status: str = "draft") -> int:
         with self.get_connection() as conn:

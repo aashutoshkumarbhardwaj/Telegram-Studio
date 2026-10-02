@@ -40,3 +40,24 @@ def test_postgres_initialization_detection():
         db = StudioDatabase(database_url="postgres://user:pass@dpg-abc-a.render.com/mydb")
         assert db.is_postgres is True
         assert db.database_url.startswith("postgresql://")
+
+
+def test_postgres_unreachable_fallback(tmp_path):
+    fallback_file = str(tmp_path / "fallback.db")
+    # Simulate failed PostgreSQL connection (like DNS error on Render)
+    db = StudioDatabase(
+        db_path=fallback_file,
+        database_url="postgresql://user:pass@dpg-nonexistent-host:5432/mydb"
+    )
+    # Should automatically fall back to SQLite without crashing
+    assert db.is_postgres is False
+    post = PostSchema(
+        content_type=ContentType.AI_NEWS,
+        title="Fallback Resilience Test",
+        body="App continues operating smoothly on SQLite."
+    )
+    draft_id = db.save_draft(user_id=1, post=post)
+    assert draft_id is not None
+    loaded = db.get_post_schema(draft_id)
+    assert loaded.title == "Fallback Resilience Test"
+

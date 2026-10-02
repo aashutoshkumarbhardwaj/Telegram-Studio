@@ -28,7 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install python dependencies
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --no-cache-dir --root-user-action=ignore --upgrade pip && \
+    pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 # Copy built frontend assets
 COPY --from=frontend-builder /app/apps/message-builder/dist ./apps/message-builder/dist
