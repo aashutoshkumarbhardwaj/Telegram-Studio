@@ -296,11 +296,13 @@ async def test_email_auto_redirect_to_gmail():
     post = res["post"]
     
     # Primary button should redirect to Gmail compose with To field filled
-    assert post["buttons"] is not None
-    assert len(post["buttons"]) >= 1
-    primary_btn = post["buttons"][0]
-    assert "mail.google.com/mail" in primary_btn["url"]
-    assert "to=careers%40acmewideworld.com" in primary_btn["url"] or "to=careers@acmewideworld.com" in primary_btn["url"]
-    assert "Apply" in primary_btn["text"] or "Email" in primary_btn["text"]
+    assert post.buttons is not None
+    assert len(post.buttons) >= 1
+    primary_btn = post.buttons[0]
+    assert "mail.google.com/mail" in primary_btn.url
+    assert "to=careers%40acmewideworld.com" in primary_btn.url or "to=careers@acmewideworld.com" in primary_btn.url
+    assert "Apply" in primary_btn.text or "Email" in primary_btn.text
+    assert "careers@acmewideworld.com" in post.body
+
 
 

@@ -464,7 +464,7 @@ Your Telegram posts are legendary: crisp, high-converting, visually structured, 
 Your goal is to write a high-engagement Telegram post from the provided input (job posting, URL content, AI announcement, tool release, GitHub repo, or notes).
 
 STRICT FORMATTING RULES:
-1. Parse mode is HTML. Use ONLY supported Telegram HTML tags: <b>bold</b>, <i>italic</i>, <code>code</code>. NEVER use markdown symbols like **, ##, or <p>/<div>/<br>.
+1. Parse mode is HTML. Use ONLY supported Telegram HTML tags: <b>bold</b>, <i>italic</i>, <code>code</code>, and <a href="...">links</a>. NEVER use markdown symbols like **, ##, or <p>/<div>/<br>.
 2. Headline (title):
    - For Jobs: '💼 [Company] is Hiring [Role Name]' (e.g. '💼 Anthropic is Hiring AI Systems Engineers ($260k-$340k)')
    - For Internships: '🎓 [Company] [Year] [Role] Internship' (e.g. '🎓 Google 2026 AI Research Internship Open')
@@ -472,7 +472,11 @@ STRICT FORMATTING RULES:
    - For AI Tools: Clear utility (e.g. '🛠 Cursor 2.0: Next-Gen AI Code Editor')
    - For GitHub: '💻 [Repo Name]: [One-line capability]' (e.g. '💻 vLLM: High-Throughput LLM Serving Engine')
    - For Hackathons: '🏆 [Hackathon Name]: [Prize Pool & Theme]'
-3. Body Structure:
+3. CRITICAL - PRESERVE KEY CONTACT & APPLICATION DETAILS:
+   - If the input contains any email address, phone number, WhatsApp contact, or specific application instructions, you MUST explicitly include them in the body text under ROLE DETAILS or KEY HIGHLIGHTS.
+   - For email addresses, write them as clean text or hyperlinked HTML so readers can immediately see and copy them.
+   - Do NOT delete, omit, or hardcode contact info. Always use the EXACT emails and phone numbers provided in the input prompt.
+4. Body Structure:
    - Opening Hook: 1-2 sharp, engaging sentences explaining the announcement or role opportunity.
    - Middle Section:
      * If Job / Internship:
@@ -482,6 +486,7 @@ STRICT FORMATTING RULES:
        • <b>Experience:</b> [Level or Years required]
        • <b>Key Skills:</b> [Top 3-4 technologies / requirements]
        • <b>Compensation:</b> [Salary / Stipend if mentioned, or 'Competitive Industry Standard']
+       • <b>Contact / Apply:</b> [Email / Phone / Link if mentioned in input]
        
        💡 <b>WHY APPLY</b>
        [1-2 sentences on why this role is a great career accelerator]
@@ -497,9 +502,10 @@ STRICT FORMATTING RULES:
        [1-2 sentences on industry / builder impact]
        
        👉 <i>Check the official link below for full details.</i>
-4. Category must be one of: 'ai_news', 'job', 'internship', 'hackathon', 'ai_tool', 'github', 'career', 'resource'.
-5. Suggested Button Label:
-   - For Job: '💼 Apply Now'
+5. Category must be one of: 'ai_news', 'job', 'internship', 'hackathon', 'ai_tool', 'github', 'career', 'resource'.
+6. Suggested Button Label:
+   - For Job with email: '📩 Apply via Email'
+   - For Job with URL: '💼 Apply Now'
    - For Internship: '🎓 Apply for Internship'
    - For Hackathon: '🏆 Register Now'
    - For AI Tool: '🛠 Try Tool'
@@ -644,8 +650,8 @@ async def call_openai_compatible_generator(
 
 # ─── 7. DETERMINISTIC COPYWRITING FALLBACK ────────────────────────────────────
 
-def _extract_job_details(text: str, source_name: str) -> Dict[str, str]:
-    """Extracts job-specific fields (company, role, location, skills, salary) from text."""
+def _extract_job_details(text: str, source_name: str) -> Dict[str, Any]:
+    """Extracts job-specific fields (company, role, location, skills, salary, contact, phone) from text."""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     
     # 1. Company
@@ -693,12 +699,19 @@ def _extract_job_details(text: str, source_name: str) -> Dict[str, str]:
     if sal_match:
         compensation = sal_match.group(1).strip()
 
+    # 6. Emails & Phone Numbers
+    emails = extract_emails(text)
+    phones = re.findall(r"(?:(?:\+|00)\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,5}\b", text)
+    valid_phones = [p.strip() for p in phones if len(re.sub(r"\D", "", p)) >= 10]
+
     return {
         "company": company,
         "location": location,
         "experience": experience,
         "skills": skills_str,
         "compensation": compensation,
+        "emails": emails,
+        "phones": valid_phones,
     }
 
 
@@ -721,25 +734,35 @@ def _build_deterministic_copy(
             details_header = "⚡ <b>INTERNSHIP DETAILS</b>"
             why_header = "💡 <b>WHY APPLY</b>"
             why_text = f"Accelerate your engineering journey with hands-on production experience at {job_info['company']}."
-            cta = "Review complete role requirements and apply directly via the link below."
-            btn_label = "🎓 Apply for Internship"
+            cta = "Submit your application or email resume directly via the link below."
+            btn_label = "🎓 Email Resume" if job_info["emails"] else "🎓 Apply for Internship"
         else:
             title = f"💼 {job_info['company']} is Hiring: {role_title}"
             hook = f"{job_info['company']} is actively expanding its team and looking for a {role_title}."
             details_header = "⚡ <b>ROLE DETAILS</b>"
             why_header = "💡 <b>WHY APPLY</b>"
             why_text = f"Opportunity to work on frontier scalable architectures with top-tier engineering leadership at {job_info['company']}."
-            cta = "Review complete requirements and apply directly via the official link below."
-            btn_label = "💼 Apply Now"
+            cta = "Submit your application or send your CV directly via the link below."
+            btn_label = "📩 Apply via Email" if job_info["emails"] else "💼 Apply Now"
+
+        detail_bullets = [
+            f"• <b>Company:</b> {job_info['company']}",
+            f"• <b>Location:</b> {job_info['location']}",
+            f"• <b>Experience:</b> {job_info['experience']}",
+            f"• <b>Key Skills:</b> {job_info['skills']}",
+            f"• <b>Compensation:</b> {job_info['compensation']}",
+        ]
+        if job_info["emails"]:
+            primary_em = job_info["emails"][0]
+            gmail_link = get_email_compose_url(primary_em)
+            detail_bullets.append(f'• <b>Send CV to:</b> <a href="{gmail_link}">{primary_em}</a>')
+        if job_info["phones"]:
+            detail_bullets.append(f"• <b>Contact / Phone:</b> {job_info['phones'][0]}")
 
         body = (
             f"{hook}\n\n"
             f"{details_header}\n"
-            f"• <b>Company:</b> {job_info['company']}\n"
-            f"• <b>Location:</b> {job_info['location']}\n"
-            f"• <b>Experience:</b> {job_info['experience']}\n"
-            f"• <b>Key Skills:</b> {job_info['skills']}\n"
-            f"• <b>Compensation:</b> {job_info['compensation']}\n\n"
+            f"{chr(10).join(detail_bullets)}\n\n"
             f"{why_header}\n"
             f"{why_text}\n\n"
             f"👉 <i>{cta}</i>"
@@ -750,6 +773,8 @@ def _build_deterministic_copy(
             f"Tech Stack: {job_info['skills']}",
             f"Compensation: {job_info['compensation']}",
         ]
+        if job_info["emails"]:
+            takeaways.append(f"Direct Email: {job_info['emails'][0]}")
         why_it_matters = why_text
     else:
         # AI News, Tools, GitHub, Hackathon
